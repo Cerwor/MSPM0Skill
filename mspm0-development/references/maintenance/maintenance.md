@@ -12,6 +12,7 @@ Use this file when changing, validating, packaging, or installing this skill. It
 | Project inspection/build lifecycle | `references/workflows/project-lifecycle.md` |
 | New-project creation | `references/workflows/scaffolding.md` |
 | DriverLib/SysConfig runtime rules | `references/runtime/driverlib-runtime.md` |
+| Board-independent TimerG QEI method | `references/runtime/qei.md` |
 | Probe/debug recovery | `references/debugging/backends.md` |
 | Board facts | `references/hardware/<board>.md` |
 | Peripheral detail | `references/hardware/<board>-peripherals/*.md` |

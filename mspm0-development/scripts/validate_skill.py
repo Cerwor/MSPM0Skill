@@ -240,6 +240,75 @@ def check_tianqiaoxing_scope(root: Path, findings: list[Finding]) -> None:
         )
 
 
+def check_qei_reference(root: Path, findings: list[Finding]) -> None:
+    path = root / "references" / "runtime" / "qei.md"
+    if not path.is_file():
+        findings.append(Finding("error", relative(path, root), "缺少通用 TimerG QEI 参考"))
+        return
+    text = read_utf8(path, findings, root)
+    if text is None:
+        return
+    required = (
+        "/ti/driverlib/QEI",
+        "DL_TimerG_configQEI",
+        "DL_TimerG_startCounter",
+        "DL_TimerG_getTimerCount",
+        "DL_TimerG_getQEIDirection",
+        "DL_TIMER_IIDX_DIR_CHANGE",
+        "ti_msp_dl_config.h",
+        "M / 2",
+        "raw == M / 2",
+        "sample_too_sparse",
+        "counts_per_rev",
+    )
+    missing = [value for value in required if value not in text]
+    if missing:
+        findings.append(
+            Finding(
+                "error",
+                relative(path, root),
+                "QEI 参考缺少必要的配置、计数或验证概念：" + ", ".join(missing),
+            )
+        )
+    forbidden_legacy_application_tokens = (
+        "encoder_qei",
+        "hw_encoder",
+        "QEI_ENCODER",
+        "PA29",
+        "PA30",
+        "PA31",
+        "TIMG8",
+        "OLED",
+        "WS2812",
+    )
+    leaked = [value for value in forbidden_legacy_application_tokens if value in text]
+    if leaked:
+        findings.append(
+            Finding(
+                "error",
+                relative(path, root),
+                "通用 QEI 参考泄漏旧板卡应用或固定引脚：" + ", ".join(leaked),
+            )
+        )
+    skill_text = read_utf8(root / "SKILL.md", findings, root)
+    if skill_text is not None:
+        routing = re.search(
+            r"(?ms)^## Quick Routing\s*$\n(?P<body>.*?)(?=^## |\Z)",
+            skill_text,
+        )
+        if routing is None:
+            findings.append(Finding("error", "SKILL.md", "无法解析 Quick Routing 段"))
+        else:
+            routing_targets = {
+                target.strip().split("#", 1)[0]
+                for target in MARKDOWN_LINK_RE.findall(routing.group("body"))
+            }
+            if "references/runtime/qei.md" not in routing_targets:
+                findings.append(
+                    Finding("error", "SKILL.md", "Quick Routing 未路由到通用 QEI 参考")
+                )
+
+
 def manifest_files(manifest: dict[str, object]) -> list[str]:
     values = manifest.get("source_files", [])
     if isinstance(values, list):
@@ -608,6 +677,7 @@ def validate(root: Path) -> list[Finding]:
     check_absolute_paths(root, findings)
     check_openai_yaml(root, skill_name, findings)
     check_tianqiaoxing_scope(root, findings)
+    check_qei_reference(root, findings)
     check_templates(root, findings)
     check_script_help(root, findings)
     check_scaffold_adaptation(root, findings)
