@@ -5,6 +5,7 @@
 #include "ti_msp_dl_config.h"
 
 #define UART_TX_BUF_SIZE 256
+#define HEARTBEAT_HALF_PERIOD_CYCLES (CPUCLK_FREQ)
 
 int UART0_sendStr(const char *str)
 {
@@ -24,11 +25,13 @@ int UART0_printf(const char *fmt, ...)
     va_list args;
 
     va_start(args, fmt);
-    len = vsprintf(buf, fmt, args);
+    len = vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
 
-    UART0_sendStr(buf);
-    return len;
+    if (len < 0) {
+        return len;
+    }
+    return UART0_sendStr(buf);
 }
 
 int main(void)
@@ -39,9 +42,9 @@ int main(void)
 
     while (1) {
         DL_GPIO_clearPins(LED_PORT, LED_PIN_22_PIN);
-        delay_cycles(80000000);
+        delay_cycles(HEARTBEAT_HALF_PERIOD_CYCLES);
         DL_GPIO_setPins(LED_PORT, LED_PIN_22_PIN);
-        delay_cycles(80000000);
+        delay_cycles(HEARTBEAT_HALF_PERIOD_CYCLES);
         UART0_printf("Hello World! %d\n", n);
         n++;
     }

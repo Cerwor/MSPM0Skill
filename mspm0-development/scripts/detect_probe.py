@@ -153,7 +153,13 @@ def windows_pnp_devices() -> list[dict[str, object]]:
         raise RuntimeError("PowerShell is unavailable")
     script = r"""
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-$devices = @(Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match '^(USB|HID)\\' })
+$probePattern = '(J-?Link|SEGGER|XDS[- ]?110|TIXDS110|ST-?Link|CMSIS[- ]?DAP|DAPLink)'
+$devices = @(Get-PnpDevice -PresentOnly | Where-Object {
+    $_.InstanceId -match '^(USB|HID)\\' -and (
+        $_.InstanceId -match 'VID_(1366|0451|0483|0D28|EF1A)' -or
+        "$($_.FriendlyName) $($_.Manufacturer)" -match $probePattern
+    )
+})
 $containerIds = @{}
 if ($devices.Count -gt 0) {
     Get-PnpDeviceProperty -InputObject $devices -KeyName 'DEVPKEY_Device_ContainerId' -ThrottleLimit 32 -ErrorAction SilentlyContinue |

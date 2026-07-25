@@ -1,10 +1,10 @@
 /**
- * Example SysConfig file for a 1 ms TIMG12 interrupt and PB22 LED on the LCKFB Tianmengxing MSPM0G3507.
- * This pattern was validated on real hardware with MSPM0 SDK 2.10.00.04 and SysConfig 1.26.2.
+ * 嘉立创天猛星 MSPM0G3507 的 TIMG12 1 ms 中断与 PB22 LED 示例。
+ * 源码模式保留既有硬件验证；当前 SysConfig 已用 1.27.0 重新生成，更新后尚未复测物理行为。
  *
  * @cliArgs --device "MSPM0G350X" --part "Default" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
  * @v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
- * @versions {"tool":"1.26.2+4477"}
+ * @versions {"tool":"1.27.0+4565"}
  */
 
 const GPIO   = scripting.addModule("/ti/driverlib/GPIO", {}, false);
@@ -37,10 +37,13 @@ pinFunction4.enable       = true;
 pinFunction4.HFXTStartup  = 10;
 pinFunction4.HFCLKMonitor = true;
 
-GPIO1.$name                         = "LED";
-GPIO1.port                          = "PORTB";
-GPIO1.associatedPins[0].$name       = "PIN_22";
-GPIO1.associatedPins[0].assignedPin = "22";
+GPIO1.$name                          = "LED";
+GPIO1.associatedPins.create(1);
+GPIO1.associatedPins[0].$name        = "PIN_22";
+GPIO1.associatedPins[0].initialValue = "CLEARED";
+GPIO1.associatedPins[0].assignedPort = "PORTB";
+GPIO1.associatedPins[0].assignedPin  = "22";
+GPIO1.associatedPins[0].pin.$assign  = "PB22";
 
 const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
 
@@ -56,7 +59,6 @@ TIMER1.peripheral.$assign = "TIMG12";
 pinFunction4.peripheral.$suggestSolution           = "SYSCTL";
 pinFunction4.peripheral.hfxInPin.$suggestSolution  = "PA5";
 pinFunction4.peripheral.hfxOutPin.$suggestSolution = "PA6";
-GPIO1.associatedPins[0].pin.$suggestSolution       = "PB22";
 Board.peripheral.$suggestSolution                  = "DEBUGSS";
 Board.peripheral.swclkPin.$suggestSolution         = "PA20";
 Board.peripheral.swdioPin.$suggestSolution         = "PA19";

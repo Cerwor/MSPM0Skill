@@ -6,12 +6,26 @@
   "board": "LCKFB Tianqiaoxing MSPM0G3519",
   "device": "MSPM0G3519",
   "package": "LQFP-64(PM)",
+  "product": "mspm0_sdk@2.10.00.04",
+  "source_product": "mspm0_sdk@2.05.01.01",
+  "sdk": "MSPM0 SDK 2.10.00.04",
+  "sysconfig": "1.27.0",
+  "source_sysconfig": "1.24.0+4110",
+  "compiler": "TI Arm Clang 4.0.4.LTS",
+  "clock": {"cpuclk_hz": 32000000, "notes": "Internal default-clock baseline."},
   "validated": true,
-  "validation_level": "hardware",
+  "validation_level": "sysconfig_syntax",
+  "prior_validation_level": "hardware",
+  "physical_behavior_revalidated": false,
   "complexity": "basic",
   "peripherals": ["GPIO", "SYSCTL", "Board"],
   "pins": ["PB22"],
   "source_files": ["main.c"],
   "syscfg": "example.syscfg",
+  "generated_names": ["GPIO_LED_PORT", "GPIO_LED_PIN_PIN", "GPIO_LED_PIN_IOMUX", "SYSCFG_DL_init"],
+  "parameters": {
+    "default_blink_hz": 5,
+    "timing": "CPUCLK_FREQ / (2 * LED_BLINK_HZ)"
+  },
   "tags": ["gpio", "led", "blink", "active-low"]
 }

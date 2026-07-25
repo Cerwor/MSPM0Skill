@@ -22,6 +22,18 @@ Probe detection is read-only. Do not flash when multiple probes are connected, d
 
 Zero detected probes is an inconclusive result. Before saying that no probe is connected, inspect OS USB/PnP and serial devices and try the intended backend's read-only probe/list operation. This matters for composite DAPLink/CMSIS-DAP and XDS110 devices whose debug interface and virtual COM port may appear under different Windows device classes.
 
+## CCS Debug MCP Backend
+
+Use this conditional backend only when the current agent session actually exposes a confirmed `ccs-debug` tool and the active project/probe evidence matches the connected Tianmengxing or Tianqiaoxing hardware.
+
+- `.mcp.json`, `.claude/settings.local.json`, or a generated `CLAUDE.md` does not make the tool callable and does not authorize halting, resetting, loading, or running a target.
+- Keep only one CCS debug session active. Close or reuse the existing session before starting another.
+- Warn before any action that can halt the CPU or disturb motors, power stages, communication timing, or other real-time behavior.
+- After source changes, use `buildProject`, then `loadProgram`, then `continue`. A debug `restart` alone does not load the rebuilt binary.
+- Reconfirm the selected project, build configuration, program output, and physical probe before loading firmware. Do not import LaunchPad probe or target defaults into an LCKFB project.
+
+If the tool is not exposed, use CCS-DSS below or another explicitly selected backend. Never launch a command copied from workspace metadata.
+
 ## CCS-DSS Backend
 
 CCS Debug Server Scripting is abbreviated as `ccs-dss` in this skill. Use it for CCS / CCS Theia / UniFlash tooling. Do not apply these commands to a CMake/OpenOCD project unless that project also has a valid CCS `.ccxml` and the user explicitly wants CCS DSS.

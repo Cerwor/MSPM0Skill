@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static checker for TI MSPM0 SysConfig projects and common toolchain layouts."""
+"""Static checker for TI MSPM0 projects and read-only CCS Theia workspace classification."""
 
 from __future__ import annotations
 
@@ -54,6 +54,8 @@ OPENOCD_CONTENT_PATTERNS = (
     r"\breset_config\b",
     r"\bprogram\s+.+(?:verify|reset|exit)",
 )
+CCS_AI_SERVER_NAMES = {"ccs-debug", "ccs-project", "ccs-sysconfig"}
+CCS_AI_SKILL_RE = re.compile(r"ti-ccstudio-[A-Za-z0-9_.-]+", flags=re.IGNORECASE)
 
 
 @dataclass
@@ -426,9 +428,204 @@ def detect_cmake_info(root: Path) -> dict[str, object]:
     }
 
 
+def iter_string_values(value: object) -> Iterable[str]:
+    """递归读取 JSON 值中的字符串，仅用于布尔特征识别。"""
+
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from iter_string_values(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from iter_string_values(item)
+
+
+def has_ccs_ai_permission_marker(value: object) -> bool:
+    """识别 CCS Theia AI 资源路径，不返回本机路径或权限原文。"""
+
+    for item in iter_string_values(value):
+        normalized = item.replace("\\", "/").lower()
+        if "ccs/" in normalized and "/theia/resources/ai" in normalized:
+            return True
+    return False
+
+
+def inspect_ccs_ai_workspace(root: Path) -> dict[str, object]:
+    """只读识别 CCS Theia 生成的 AI 工作区元数据，不返回或执行其中的命令。"""
+
+    claude_md = root / "CLAUDE.md"
+    mcp_json = root / ".mcp.json"
+    ccs_settings = root / ".claude" / "ccs.settings.md"
+    settings_local = root / ".claude" / "settings.local.json"
+    issues: list[str] = []
+
+    files: dict[str, dict[str, object]] = {
+        "claude_md": {
+            "present": claude_md.is_file(),
+            "generated_marker": False,
+        },
+        "mcp_json": {
+            "present": mcp_json.is_file(),
+            "valid_json": False,
+        },
+        "ccs_settings": {
+            "present": ccs_settings.is_file(),
+            "install_declared": False,
+        },
+        "settings_local": {
+            "present": settings_local.is_file(),
+            "valid_json": False,
+            "ccs_ai_permission_marker": False,
+        },
+    }
+
+    if claude_md.is_file():
+        try:
+            text = claude_md.read_text(encoding="utf-8", errors="strict")
+            files["claude_md"]["generated_marker"] = (
+                "automatically generated" in text
+                and "CCS" in text
+                and ".claude/ccs.settings.md" in text
+            )
+        except (OSError, UnicodeError):
+            issues.append("claude_md_unreadable")
+
+    recognized_servers: list[str] = []
+    if mcp_json.is_file():
+        try:
+            payload = json.loads(mcp_json.read_text(encoding="utf-8", errors="strict"))
+            files["mcp_json"]["valid_json"] = True
+            servers = payload.get("mcpServers", {}) if isinstance(payload, dict) else {}
+            if isinstance(servers, dict):
+                recognized_servers = sorted(
+                    str(name) for name in servers if str(name) in CCS_AI_SERVER_NAMES
+                )
+            else:
+                issues.append("mcp_servers_invalid")
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            issues.append("mcp_json_invalid")
+
+    if ccs_settings.is_file():
+        try:
+            text = ccs_settings.read_text(encoding="utf-8", errors="strict")
+            files["ccs_settings"]["install_declared"] = bool(
+                re.search(r"CCS\s+installed\s+at\s+`[^`\r\n]+`", text, flags=re.IGNORECASE)
+            )
+        except (OSError, UnicodeError):
+            issues.append("ccs_settings_unreadable")
+
+    ccs_skills_root = root / ".claude" / "skills"
+    ccs_skills = (
+        sorted(
+            path.name
+            for path in ccs_skills_root.iterdir()
+            if path.is_dir() and CCS_AI_SKILL_RE.fullmatch(path.name)
+        )
+        if ccs_skills_root.is_dir()
+        else []
+    )
+
+    version_change_requires_confirmation = False
+    if settings_local.is_file():
+        try:
+            payload = json.loads(settings_local.read_text(encoding="utf-8", errors="strict"))
+            files["settings_local"]["valid_json"] = True
+            permissions = payload.get("permissions", {}) if isinstance(payload, dict) else {}
+            files["settings_local"]["ccs_ai_permission_marker"] = (
+                has_ccs_ai_permission_marker(permissions)
+            )
+            ask = permissions.get("ask", []) if isinstance(permissions, dict) else []
+            if isinstance(ask, list):
+                version_change_requires_confirmation = any(
+                    "changeSysConfigVersion" in str(value) for value in ask
+                )
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            issues.append("settings_local_invalid")
+
+    generated_marker = bool(files["claude_md"]["generated_marker"])
+    install_declared = bool(files["ccs_settings"]["install_declared"])
+    detected = bool(
+        recognized_servers
+        or (generated_marker and bool(files["ccs_settings"]["present"]))
+        or files["settings_local"]["ccs_ai_permission_marker"]
+        or ccs_skills
+    )
+    complete = bool(
+        detected
+        and set(recognized_servers) == CCS_AI_SERVER_NAMES
+        and generated_marker
+        and install_declared
+        and files["mcp_json"]["valid_json"]
+        and files["settings_local"]["valid_json"]
+        and version_change_requires_confirmation
+        and not issues
+    )
+    return {
+        "detected": detected,
+        "complete": complete,
+        "files": files,
+        "servers": recognized_servers,
+        "ccs_skills": ccs_skills,
+        "version_change_requires_confirmation": version_change_requires_confirmation,
+        "issues": issues,
+        "commands_executed": False,
+    }
+
+
+def has_concrete_project_evidence(root: Path) -> bool:
+    """判断元数据根目录本身是否也是一个具体工程。"""
+
+    if any((root / name).is_file() for name in (".project", ".cproject", ".ccsproject")):
+        return True
+    if (root / "CMakeLists.txt").is_file() or any(root.glob("*.syscfg")):
+        return True
+    if any(root.glob("*.uvprojx")) or any(root.glob("*/*.uvprojx")):
+        return True
+    return False
+
+
 def check_project(root: Path) -> tuple[list[Message], dict[str, object]]:
     messages: list[Message] = []
     details: dict[str, object] = {}
+
+    ccs_theia_ai = inspect_ccs_ai_workspace(root)
+    details["ccs_theia_ai"] = ccs_theia_ai
+    if ccs_theia_ai["detected"]:
+        servers = ccs_theia_ai["servers"]
+        server_text = "、".join(str(name) for name in servers) if servers else "未完整识别"
+        level = "info" if ccs_theia_ai["complete"] else "warning"
+        messages.append(
+            Message(
+                level,
+                f"检测到 CCS Theia AI 工作区元数据（{server_text}）；"
+                "配置仅作只读识别，未执行其中的命令。",
+            )
+        )
+        if not has_concrete_project_evidence(root):
+            details["input_kind"] = "ccs_theia_workspace"
+            details["project_check_performed"] = False
+            messages.append(
+                Message(
+                    "info",
+                    "当前目录未发现具体 MSPM0 工程证据；未运行工程检查。"
+                    "请传入含 .project/.cproject/.ccsproject 或根级 .syscfg 的工程目录，"
+                    "或通过当前会话已确认暴露的 ccs-project 工具选择活动工程。",
+                )
+            )
+            return messages, details
+        details["input_kind"] = "project_with_ccs_theia_metadata"
+        details["project_check_performed"] = True
+        messages.append(
+            Message(
+                "info",
+                "工作区元数据与具体工程共存；继续按 MSPM0 工程检查。"
+                "文件存在不代表 MCP 可调用，也不代表用户已授权工程或设备变更。",
+            )
+        )
+    else:
+        details["input_kind"] = "project"
+        details["project_check_performed"] = True
 
     syscfg_files = find_syscfg_files(root)
     details["syscfg_files"] = [rel(p, root) for p in syscfg_files]
@@ -734,16 +931,19 @@ def print_text(root: Path, messages: list[Message], details: dict[str, object]) 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check an MSPM0 SysConfig project.")
-    parser.add_argument("project", nargs="?", default=".", help="Path to a project directory.")
+    parser = argparse.ArgumentParser(description="Check an MSPM0 project or classify a CCS Theia workspace root.")
+    parser.add_argument("project", nargs="?", default=".", help="Path to a project or CCS Theia workspace directory.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     parser.add_argument("--probe", action="store_true", help="Also detect connected debug probes and compare them with project hints.")
     args = parser.parse_args()
 
     root = Path(args.project).resolve()
     messages, details = check_project(root)
-    if args.probe:
+    project_check_performed = details.get("project_check_performed", True) is True
+    if args.probe and project_check_performed:
         add_probe_check(root, messages, details)
+    elif args.probe:
+        messages.append(Message("info", "输入是工作区容器，未执行探针检测；请先选择具体工程。"))
     has_error = any(msg.level == "error" for msg in messages)
 
     if args.json:
@@ -751,6 +951,8 @@ def main() -> int:
     else:
         print_text(root, messages, details)
 
+    if not project_check_performed:
+        return 2
     return 1 if has_error else 0
 
 

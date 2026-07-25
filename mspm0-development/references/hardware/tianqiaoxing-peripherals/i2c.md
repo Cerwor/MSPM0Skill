@@ -1,42 +1,23 @@
-# I2C on Tianqiaoxing G3519
+# 天巧星 I2C
 
-## Board I2C Bus
+## 选择硬件或软件实现
 
-| 引脚 | 功能 | 方式 | 设备 |
-|------|------|------|------|
-| PA0 (SDA) | I2C 数据线 | **软件 I2C**（GPIO 位模拟） | OLED + IMU (LSM6DS3) 共享总线 |
-| PA1 (SCL) | I2C 时钟线 | **软件 I2C**（GPIO 位模拟） | 同上 |
+- 优先使用硬件 I2C；从当前 MSPM0G3519 LQFP-64(PM) SysConfig metadata 选择同一实例的合法 SDA/SCL 复用。
+- 只有在引脚约束或既有工程架构明确需要时才使用软件 I2C。
+- 本 skill 不保存天巧星板载应用总线、地址或固定接线；这些事实必须来自用户当次提供的原理图和器件资料。
 
-板载 2.2kΩ 上拉电阻。OLED 和 IMU 在同一条 I2C 总线上（不是两组独立总线）。
+## 电气与协议检查
 
-## Software I2C 实现
+1. 确认总线电压、外部上拉、器件 7 位地址、最高速率和时钟拉伸要求。
+2. 不把两个相邻 GPIO 自动视为合法硬件 I2C 引脚。
+3. 软件 I2C 的高电平应通过释放开漏线获得，不能用推挽高电平与其他器件争用。
+4. 所有等待 ACK、BUSY 和传输完成的循环都设置超时。
+5. 出错后先记录 NACK/仲裁/超时，再根据器件资料决定是否允许总线恢复。
 
-固件使用 GPIO open-drain 模拟：
+## SysConfig 与运行时
 
-```c
-#define IIC_SDA_H()    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_0)
-#define IIC_SDA_L()    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_0)
-#define IIC_SCL_H()    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_1)
-#define IIC_SCL_L()    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_1)
-#define IIC_SDA_READ() DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_0)
-```
+- 创建 `/ti/driverlib/I2C` 实例，显式分配 SDA/SCL，并按目标总线设置速率。
+- 重新生成后核对实例、引脚、IRQ 和 DMA 宏；不要凭参考文档拼写生成名。
+- 先做一次可观测的单寄存器读写，再扩展到中断或 DMA。
 
-## Hardware I2C（可选）
-
-I2C0 也可配为硬件模式（400 kHz），使用 `scaffold_oled.py --i2c hw`。
-
-硬件 I2C 参数：
-- Bus Clock: 40 MHz
-- Speed: 400 kHz
-- Digital Glitch Filter: 8-clock width
-
-## I2C 设备地址
-
-| 设备 | 地址 | 备注 |
-|------|------|------|
-| OLED (SSD1306/SSD1312) | 0x3C | 128×64 单色 |
-| LSM6DS3TRC IMU | 0x6A | SA0 接地 |
-
-## 自由 I2C 引脚
-
-如需额外 I2C 总线，推荐：PA12(SCL)/PA13(SDA) 或 PA3(SCL)/PA4(SDA)。
+只有逻辑分析仪波形或目标器件响应才能证明实际总线工作；SysConfig 和构建成功只证明配置与代码可生成。

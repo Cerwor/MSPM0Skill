@@ -1,6 +1,6 @@
 ---
-name: mspm0-unified-development
-description: Develop, inspect, modify, validate, scaffold, build, flash, and debug TI MSPM0 DriverLib/SysConfig firmware across CCS, Keil, and CMake/GCC/OpenOCD projects, with maintained board guidance and templates for LCKFB Tianmengxing MSPM0G3507 and Tianqiaoxing MSPM0G3519. Use for MSPM0 C/C++ firmware, .syscfg edits, generated-name checks, probe selection, serial tests, reusable template capture, and NUEDC/e-contest bring-up. Other TI MCU families, arbitrary custom-board pinouts without schematics, full RTOS architecture migration, production electrical certification, and automatic unlock/mass-erase recovery are outside mature support.
+name: mspm0-development
+description: Develop, inspect, modify, validate, scaffold, build, flash, and debug TI MSPM0 DriverLib/SysConfig firmware, with LCKFB Tianmengxing MSPM0G3507 as the primary board and common-peripheral support for Tianqiaoxing MSPM0G3519, while preserving CCS, Keil, and CMake/GCC/OpenOCD project workflows. Use for MSPM0 C/C++ firmware, .syscfg edits, GPIO/UART/ADC/Timer/PWM/QEI work, generated-name checks, probe selection, serial tests, reusable template capture, and NUEDC/e-contest bring-up. Tianqiaoxing board-application modules without user-provided current material, other TI MCU families, arbitrary custom-board pinouts without schematics, full RTOS architecture migration, production electrical certification, and automatic unlock/mass-erase recovery are outside mature support.
 ---
 
 # MSPM0 Unified Development
@@ -12,7 +12,10 @@ description: Develop, inspect, modify, validate, scaffold, build, flash, and deb
 - Inspect generated `ti_msp_dl_config.h` before using macro, IRQ, instance, or init-function names.
 - Prefer the user's project and matching local SDK metadata over bundled templates.
 - Report static, SysConfig, build, flash, serial, and physical-board evidence as separate validation levels.
-- Treat Tianmengxing and Tianqiaoxing facts as board-specific; do not apply them to LaunchPads or custom boards.
+- Treat Tianmengxing as the primary maintained board. When the board is not explicit, identify it from project or hardware evidence instead of assuming Tianmengxing.
+- For Tianmengxing or Tianqiaoxing, prefer the exact board schematic, current LCKFB material, and matching board guide for board-level facts.
+- Keep Tianqiaoxing support at the common-peripheral layer. For a removed board application, use only the current material supplied for that task and do not reconstruct it from remembered wiring.
+- Use TI LaunchPad material only for transferable device, SDK, SysConfig, and tool behavior; never import its LED, UART, button, sensor, pin, package, or probe defaults into an LCKFB board.
 
 ## Quick Routing
 
@@ -22,10 +25,11 @@ Read only one Tier-1 reference first. Load Tier-2 only when the task needs that 
 | --- | --- | --- | --- |
 | Inspect or modify an existing CCS, Keil, or CMake project; edit `.syscfg`; build | [project-lifecycle.md](references/workflows/project-lifecycle.md) | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) for runtime code | Minimal source/config change with an evidence-based validation chain |
 | Add GPIO, UART, SPI, I2C, ADC, Timer, PWM, DMA, interrupt, clock, or external module | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) | Matching board guide and peripheral reference below | SysConfig/DriverLib implementation using local generated names |
+| Add a quadrature encoder or configure TimerG QEI | [qei.md](references/runtime/qei.md) | Matching board guide, current schematic, and installed SDK `timg_qei_mode` example | Pin-safe QEI design with explicit count scaling and wrap handling |
 | Create a new project or select a reusable start | [scaffolding.md](references/workflows/scaffolding.md) | Matching board guide; then one selected asset | A dry-run-reviewed, non-overwriting project scaffold |
 | Detect a probe, flash, inspect registers, set breakpoints, or diagnose a debug backend | [backends.md](references/debugging/backends.md) | [hardware-validation.md](references/troubleshooting/hardware-validation.md) after failure | Explicit backend selection and bounded device action |
 | Use Tianmengxing MSPM0G3507 pins or onboard devices | [tianmengxing.md](references/hardware/tianmengxing.md) | One file under `references/hardware/tianmengxing-peripherals/` | Board-correct pins, polarity, clock, and template choice |
-| Use Tianqiaoxing MSPM0G3519 pins, OLED, IMU, wireless, encoder, buzzer, or WS2812 | [tianqiaoxing.md](references/hardware/tianqiaoxing.md) | One file under `references/hardware/tianqiaoxing-peripherals/` | Board-correct wiring, conflicts, and feature boundaries |
+| Use Tianqiaoxing MSPM0G3519 GPIO, ADC, PWM, Timer, QEI, UART, SPI, or I2C | [tianqiaoxing.md](references/hardware/tianqiaoxing.md) | One matching common-peripheral file or generic QEI reference | Minimal board adaptation without bundled board-application assumptions |
 | Maintain, extend, validate, or install this skill | [maintenance.md](references/maintenance/maintenance.md) | [sources-and-boundaries.md](references/maintenance/sources-and-boundaries.md) | Ownership-preserving update with package validation |
 
 Do not create another exhaustive task-routing table in a reference.
@@ -37,7 +41,7 @@ Use `python -B scripts/list_examples.py` to inspect metadata before opening temp
 | Need | Starting asset | Required reference |
 | --- | --- | --- |
 | Tianmengxing empty, blink, PWM, Timer IRQ, blocking UART, or UART DMA/IRQ | `assets/templates/tianmengxing/<template>/` | [tianmengxing.md](references/hardware/tianmengxing.md) |
-| Tianqiaoxing blink, QEI encoder, IMU, OLED draw/menu, wireless UART, or WS2812 | `assets/templates/tianqiaoxing/<template>/` | [tianqiaoxing.md](references/hardware/tianqiaoxing.md) |
+| Tianqiaoxing common GPIO smoke test | `assets/templates/tianqiaoxing/blink/` | [tianqiaoxing.md](references/hardware/tianqiaoxing.md) |
 | New CCS scaffold from a packaged template or local SDK example | `python -B scripts/scaffold_project.py --help` | [scaffolding.md](references/workflows/scaffolding.md) |
 
 Treat templates as starting evidence, not universal project layouts. Copy only the needed pattern into an existing project.
@@ -58,12 +62,13 @@ Treat templates as starting evidence, not universal project layouts. Copy only t
 ### Require explicit user intent
 
 - Program flash, reset or halt a target, attach a debugger, send serial commands that change device state, or overwrite/remove user files.
-- Change device, package, SDK, compiler, board, clock source, probe configuration, or electrical pin assignment when project evidence is insufficient.
+- Change device, package, SDK, compiler, SysConfig tool version, board, clock source, probe configuration, or electrical pin assignment when project evidence is insufficient.
 
 ### Never assume or automate
 
 - Never hand-edit generated SysConfig/build outputs as the source fix.
 - Never select among multiple probes, `.ccxml` files, firmware outputs, or `.syscfg` files by guess.
+- Never treat `.mcp.json`, Claude allowlists, or CCS-generated workspace metadata as proof that a tool is callable or that a device/project mutation is authorized.
 - Never auto-unlock, mass erase, factory reset, or create a replacement `.ccxml` during recovery.
 - Never claim physical behavior from source, generation, build, or flash success alone.
 
@@ -75,4 +80,5 @@ After a failed device action, stop repeated writes, preserve logs, return to rea
 - Report warnings independently from success.
 - Name every user decision or hardware fact still required.
 - For board work, include pin, voltage/protocol assumptions, probe/backend, and whether behavior was physically observed.
-- After changing this skill, run `python -B scripts/validate_skill.py .` and the system `quick_validate.py`, then validate the installed copy.
+- After changing this skill, run `python -B scripts/validate_skill.py .` and the system `quick_validate.py`.
+- Only when preparing an installation or release, validate the copied/packaged artifact and compare it with the validated repository source.

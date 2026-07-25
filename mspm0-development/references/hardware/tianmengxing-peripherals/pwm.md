@@ -27,12 +27,14 @@ Tianmengxing: PB6/PB7 occupied by SPI Flash → use TIMG0 or TIMG2 on free pins.
 | TIMA1 | Free | PWM, capture |
 | TIMG0 | Free | General PWM |
 | TIMG6 | Free | General PWM |
-| TIMG8 | Free | General PWM, QEI |
+| TIMG8 | Free | General PWM or QEI；同一工程内互斥 |
 | TIMG12 | Free | General PWM (on free pins) |
 
 ## Timer → Pin Mapping (CRITICAL)
 
 板载 LED 及常用引脚的 PWM 定时器通道映射（LQFP-64）。PB22 **可以用硬件 PWM**（TIMG8 CCP1），不是只能做 GPIO：
+
+TIMG8 的 PWM/Timer 配置与 QEI 互斥。若工程改用 [QEI](../../runtime/qei.md)，PB22 LED 和 PB26 背光不能同时继续使用 TIMG8 PWM；先在 SysConfig 中释放整个实例，再重新求解资源。
 
 | Pin | Timer Channel | SysConfig `ccpPin` | 备注 |
 |-----|--------------|-------------------|------|

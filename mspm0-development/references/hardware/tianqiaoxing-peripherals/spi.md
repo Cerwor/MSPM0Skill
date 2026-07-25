@@ -1,59 +1,20 @@
-# SPI on Tianqiaoxing G3519
+# 天巧星 SPI
 
-## Board SPI — W25Q64 Flash
+## 通用流程
 
-| Pin | Function |
-|-----|----------|
-| PB9 | SCLK |
-| PB8 | MOSI (PICO) |
-| PB7 | MISO (POCI) |
-| PB6 | CS (GPIO 手动控制) |
+1. 确认从设备电压、SPI mode、位宽、bit order、最高时钟和片选时序。
+2. 在当前 `.syscfg` 中选择未冲突的 SPI 实例及合法 SCLK/PICO/POCI 复用。
+3. 片选可由 SPI 外设或 GPIO 管理，但一个事务内必须保持符合器件手册的电平。
+4. 重新生成后核对实例、FIFO、DMA/IRQ 和引脚宏。
+5. 先用低速、短事务验证 ID 或回读，再提高时钟或接入 DMA。
 
-- Instance: SPI1
-- Clock: **20 MHz**（需 CPUCLK ≥ 40 MHz，即 80 MHz 时钟下才能跑满速；32 MHz 下 SysConfig 会报 "input clock must be 2x faster"，需降到 ≤16 MHz）
-- Mode: Motorola SPI Mode 3 (MOTO3, POL1/PHA1)
-- Data: 8-bit, MSB first
-- Chip: **W25Q64**（64 Mbit = 8 MB），批量产品标配
+本 skill 不携带天巧星板载 SPI 应用的器件型号、分区或固定接线。若任务涉及具体器件，以用户提供的当前原理图和数据手册为唯一应用依据。
 
-> 设备 ID（命令 0x90）：**0xEF16**（0xEF=Winbond, 0x16=W25Q64）。W25Q128 是 0xEF17。
+## 常见故障
 
-Flash 分区（W25Q64 = 8 MB，最大地址 0x7FFFFF）：
-| 地址范围 | 内容 |
-|----------|------|
-| 0x000000–0x03FFFF | HZK16 中文字库 (256 KB) |
-| 0x040000–0x04A3FF | Unicode→GB2312 映射 (42 KB) |
-| 0x050000–0x07FFFF | HZK12 中文字库 (192 KB) |
-| 0x080000–0x0F7FFF | HZK20 中文字库 (480 KB) |
-| 0x7FF000–0x7FFFFF | 系统参数 (4 KB，W25Q64 末尾扇区) |
+- mode 不匹配会表现为每字节移位或完全无响应。
+- 输入时钟不足时，SysConfig 可能拒绝目标 SPI 频率；应调整目标频率或时钟树，而不是硬改生成文件。
+- PICO/POCI 命名与 MOSI/MISO 视角不同，连接前按控制器/外设角色核对。
+- DMA 完成只说明搬运结束，仍要满足 BUSY 清零和片选释放时序。
 
-> ⚠️ **分区注意**：参考全功能固件原本用 `0xFFF000` 存系统参数，那是 W25Q128（16 MB）的末尾。**W25Q64 只有 8 MB（最大 0x7FFFFF）**，`0xFFF000` 超界访问会回绕或失败。移植到 W25Q64 时，系统参数地址改为 **0x7FF000**（末尾扇区）。
-
-## Key APIs
-
-```c
-// CS 控制
-#define SPI_CS(x) ((x) ? DL_GPIO_setPins(FLASH_PORT, FLASH_CS_PIN) \
-                       : DL_GPIO_clearPins(FLASH_PORT, FLASH_CS_PIN))
-
-// 单字节读写
-static uint8_t spi_xfer(uint8_t dat) {
-    DL_SPI_transmitDataBlocking8(SPI_FLASH_INST, dat);
-    while (DL_SPI_isBusy(SPI_FLASH_INST));
-    return DL_SPI_receiveDataBlocking8(SPI_FLASH_INST);
-}
-
-// 读设备 ID（验证芯片在位）
-uint16_t flash_read_id(void) {
-    uint16_t id;
-    SPI_CS(0);
-    spi_xfer(0x90); spi_xfer(0); spi_xfer(0); spi_xfer(0);
-    id  = spi_xfer(0xFF) << 8;
-    id |= spi_xfer(0xFF);
-    SPI_CS(1);
-    return id;   // W25Q64 → 0xEF16
-}
-```
-
-## Free SPI Instance
-
-SPI0 可自由使用。推荐引脚：PA7(SCLK), PA8(MOSI), PA9(MISO), PA12(CS)。
+没有逻辑分析仪或目标器件回读时，只能报告生成/构建结果，不能声称总线物理时序正确。
