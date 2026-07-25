@@ -1,0 +1,4 @@
+interface:
+  display_name: "MSPM0 统一开发"
+  short_description: "统筹 MSPM0 工程、SysConfig、板级模板、构建烧录与调试验证"
+  default_prompt: "使用 $mspm0-unified-development 检查当前 MSPM0 工程证据，选择正确板卡与工作流，并完成分级验证。"

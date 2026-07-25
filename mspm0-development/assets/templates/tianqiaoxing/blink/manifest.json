@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "name": "blink",
+  "title": "Tianqiaoxing PB22 LED Blink",
+  "description": "Minimal active-low PB22 onboard LED blink baseline.",
+  "board": "LCKFB Tianqiaoxing MSPM0G3519",
+  "device": "MSPM0G3519",
+  "package": "LQFP-64(PM)",
+  "validated": true,
+  "validation_level": "hardware",
+  "complexity": "basic",
+  "peripherals": ["GPIO", "SYSCTL", "Board"],
+  "pins": ["PB22"],
+  "source_files": ["main.c"],
+  "syscfg": "example.syscfg",
+  "tags": ["gpio", "led", "blink", "active-low"]
+}
