@@ -9,10 +9,12 @@ import re
 import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+TEMPLATE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 SKIP_DIRS = {
     ".git",
     ".svn",
@@ -26,7 +28,13 @@ SKIP_DIRS = {
     "ticlang",
     "targetConfigs",
 }
-SKIP_FILES = {"README.md", "README.html", "manifest.json"}
+SKIP_FILES = {
+    "README.md",
+    "README.html",
+    "manifest.json",
+    "ti_msp_dl_config.c",
+    "ti_msp_dl_config.h",
+}
 COPY_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp", ".syscfg", ".cmd"}
 
 
@@ -70,6 +78,24 @@ def validate_project_name(value: str) -> str:
     return value
 
 
+def validate_template_name(value: str) -> str:
+    if not TEMPLATE_NAME_RE.fullmatch(value):
+        raise argparse.ArgumentTypeError(
+            "模板名必须是单个安全目录名，且只能包含字母、数字、点、下划线和连字符"
+        )
+    return value
+
+
+def safe_template_path(parent: Path, template: str) -> Path:
+    parent = parent.resolve()
+    candidate = (parent / template).resolve()
+    try:
+        candidate.relative_to(parent)
+    except ValueError as exc:
+        raise SystemExit(f"模板路径越出允许目录：{candidate}") from exc
+    return candidate
+
+
 def source_candidates(
     board: BoardProfile,
     template: str,
@@ -77,18 +103,19 @@ def source_candidates(
     sdk_root: Path | None,
 ) -> list[tuple[str, Path]]:
     candidates: list[tuple[str, Path]] = []
-    packaged = SKILL_ROOT / "assets" / "templates" / board.key / template
+    packaged_root = SKILL_ROOT / "assets" / "templates" / board.key
+    packaged = safe_template_path(packaged_root, template)
     if source_kind in {"auto", "packaged"}:
         candidates.append(("packaged", packaged))
     if source_kind in {"auto", "sdk"} and sdk_root is not None:
-        sdk = (
+        sdk_root_dir = (
             sdk_root
             / "examples"
             / "nortos"
             / board.sdk_board
             / "driverlib"
-            / template
         )
+        sdk = safe_template_path(sdk_root_dir, template)
         candidates.append(("sdk", sdk))
     return candidates
 
@@ -130,6 +157,10 @@ def destination_relative(path: Path, source: Path, project_name: str) -> Path:
     return rel
 
 
+def escape_xml_attribute(value: str) -> str:
+    return escape(value, {'"': "&quot;"})
+
+
 def make_plan(
     board: BoardProfile,
     project_name: str,
@@ -152,6 +183,14 @@ def make_plan(
         }
         for path in source_files
     ]
+    warnings: list[str] = []
+    if source_kind == "sdk":
+        warnings.append(
+            "SDK 例程会移除 LaunchPad board selector 并适配受支持的封装元数据，"
+            "但仍保留原始 LaunchPad 外设与引脚配置；"
+            "必须按所选板级指南复核全部引脚、极性和板载占用。"
+        )
+    warnings.append("生成的探针连接仅写入工程元数据，不代表已授权连接或烧录设备。")
     return {
         "status": "planned",
         "board": asdict(board),
@@ -165,10 +204,22 @@ def make_plan(
         "operations": operations,
         "writes_project": True,
         "writes_device": False,
+        "warnings": warnings,
     }
 
 
 def adapt_syscfg(text: str, board: BoardProfile) -> str:
+    text = re.sub(
+        r'[ \t]+--board[ \t]+(?:"?/ti/boards/LP_[^ \t\r\n"]+"?)'
+        r'(?:[ \t]+--rtos[ \t]+\S+)?',
+        "",
+        text,
+    )
+    text = re.sub(
+        r"(?m)^[ \t]*(?://|\*)[ \t]*@cliArgs[ \t]*\r?$",
+        "",
+        text,
+    )
     text = re.sub(
         r'--package\s+"LQFP-100\(PZ\)"',
         f'--package "{board.package}"',
@@ -185,15 +236,25 @@ def project_spec(
     destination: Path,
 ) -> str:
     file_entries = []
+    include_dirs: set[str] = set()
     for path in copied_files:
         if path.suffix.lower() not in {".c", ".cc", ".cpp", ".h", ".hpp"}:
             continue
         rel = path.relative_to(destination).as_posix()
+        if path.parent != destination:
+            include_dirs.add(path.parent.relative_to(destination).as_posix())
+        escaped_rel = escape_xml_attribute(rel)
         file_entries.append(
-            f'        <file path="{rel}" openOnCreation="false" '
+            f'        <file path="{escaped_rel}" openOnCreation="false" '
             'excludeFromBuild="false" action="copy"/>'
         )
     files = "\n".join(file_entries)
+    nested_include_options = "\n            ".join(
+        f'-I&quot;${{PROJECT_ROOT}}/{escape_xml_attribute(path)}&quot;'
+        for path in sorted(include_dirs)
+    )
+    if nested_include_options:
+        nested_include_options = f"\n            {nested_include_options}"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <projectSpec>
     <applicability><when><context deviceFamily="ARM" deviceId="{board.chip}"/></when></applicability>
@@ -204,8 +265,9 @@ def project_spec(
         ignoreDefaultDeviceSettings="true" ignoreDefaultCCSSettings="true"
         products="MSPM0-SDK;sysconfig"
         compilerBuildOptions="-I${{PROJECT_ROOT}} -I${{PROJECT_ROOT}}/${{ConfigName}}
+            -D__{board.chip}__
             -I${{COM_TI_MSPM0_SDK_INSTALL_DIR}}/source/third_party/CMSIS/Core/Include
-            -I${{COM_TI_MSPM0_SDK_INSTALL_DIR}}/source
+            -I${{COM_TI_MSPM0_SDK_INSTALL_DIR}}/source{nested_include_options}
             -O2 @device.opt -gdwarf-3 -mcpu=cortex-m0plus -march=thumbv6m
             -mfloat-abi=soft -mthumb"
         linkerBuildOptions="-ldevice.cmd.genlibs
@@ -268,7 +330,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("project_name", type=validate_project_name, help="新工程名")
     parser.add_argument("--board", required=True, choices=sorted(BOARD_PROFILES))
-    parser.add_argument("--template", required=True, help="内置模板名或 SDK driverlib 例程名")
+    parser.add_argument(
+        "--template",
+        required=True,
+        type=validate_template_name,
+        help="内置模板名或 SDK driverlib 例程名",
+    )
     parser.add_argument(
         "--source",
         choices=("auto", "packaged", "sdk"),
@@ -326,6 +393,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(plan, ensure_ascii=False, indent=2))
     else:
         print(f"工程已创建：{destination}")
+        for warning in plan["warnings"]:
+            print(f"警告：{warning}")
         print(f"下一步：python -B scripts/check_syscfg.py \"{destination}\"")
         print(f"然后运行：python -B scripts/run_sysconfig.py \"{destination}\"")
     return 0

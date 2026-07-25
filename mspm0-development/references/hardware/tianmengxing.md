@@ -51,7 +51,7 @@
 
 ## 工程入口
 
-- 新工程：先读 [scaffolding.md](../workflows/scaffolding.md)，使用 `scripts/scaffold_project.py --board tianmengxing --probe xds110`。
+- 新工程：先读 [scaffolding.md](../workflows/scaffolding.md)。嘉立创 CCS 教程以外接 J-Link 为常用起点，可使用 `scripts/scaffold_project.py --board tianmengxing --probe jlink`；若实物连接的是 XDS110，必须按实物显式改选。
 - 现有工程、生成和构建：读 [project-lifecycle.md](../workflows/project-lifecycle.md)。
 - 探针、烧录和调试：读 [backends.md](../debugging/backends.md)。设备写入必须来自用户明确意图。
 - 可复用起点：`assets/templates/tianmengxing/`。
@@ -62,4 +62,4 @@
 
 ## 烧录注意事项
 
-若 DSLite 报 XDS110 `Error -260`，先检查 Windows 设备管理器中的 XDS110 驱动；CCS 安装通常附带 `ccs_base/emulation/windows/xds110_drivers/DPInst64.exe`。驱动问题与固件编译问题分开报告。
+先检测实际探针并核对 `.ccxml`，不要因板卡名称自动选择 J-Link 或 XDS110。若 DSLite 报 XDS110 `Error -260`，先检查 Windows 设备管理器中的 XDS110 驱动；CCS 安装通常附带 `ccs_base/emulation/windows/xds110_drivers/DPInst64.exe`。驱动问题与固件编译问题分开报告。

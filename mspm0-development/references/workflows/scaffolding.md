@@ -15,7 +15,7 @@ Use this reference only when creating a new MSPM0 project from a packaged templa
 2. Inspect the scaffold command and run a dry run:
 
    ```powershell
-   python -B scripts/scaffold_project.py demo --board tianmengxing --template led_blink --output <output-dir> --probe xds110 --dry-run
+   python -B scripts/scaffold_project.py demo --board tianmengxing --template led_blink --output <output-dir> --probe jlink --dry-run
    ```
 
 3. Confirm board, device, package, probe, template source, and a destination that does not exist.
@@ -27,19 +27,24 @@ The scaffolder refuses an existing destination and has no force mode. It copies 
 
 ## Packaged template versus SDK example
 
-- Prefer a packaged template for a maintained Tianmengxing or Tianqiaoxing board feature.
+- Prefer a packaged template for a maintained Tianmengxing feature or the Tianqiaoxing GPIO smoke test.
 - Prefer a local SDK example when no packaged template matches, when the installed SDK version matters, or when the task targets a generic/custom board.
-- Pass `--sdk-root <path> --sdk-example <relative-path>` explicitly. The relative example path must remain under the SDK root.
+- Pass the SDK DriverLib example name as `--template <name>` together with `--source sdk --sdk-root <path>`.
+- SDK examples are LaunchPad-oriented sources. The scaffolder removes the LaunchPad board selector and adapts supported package metadata, but it does not claim automatic peripheral/pin remapping; review every retained pin against the selected board guide before generation or build.
 - Templates are pattern sources, not authoritative pin maps for unrelated boards.
 
-## Board and probe defaults
+## Tianqiaoxing application boundary
 
-| Board key | Device/package | Expected probe |
+Only the common-peripheral references and the minimal blink template are bundled for Tianqiaoxing. When a task needs a board-application module, treat the user's current schematic, code, datasheet, and wiring notes as task-local input; do not infer a missing application template or silently promote it into the skill.
+
+## Board and probe starting points
+
+| Board key | Device/package | LCKFB documentation starting point |
 | --- | --- | --- |
-| `tianmengxing` | MSPM0G3507 / LQFP-64 | `xds110` |
-| `tianqiaoxing` | MSPM0G3519 / LQFP-64 | `jlink` |
+| `tianmengxing` | MSPM0G3507 / LQFP-64 | External J-Link in the CCS tutorial |
+| `tianqiaoxing` | MSPM0G3519 / LQFP-64(PM) | External XDS110 supplied with the kit |
 
-Probe selection is metadata for the generated project. It does not authorize connecting to or programming a target.
+These are starting points, not hard board bindings. Detect or inspect the actual probe, then pass `--probe jlink` or `--probe xds110` explicitly. Probe selection is metadata for the generated project and does not authorize connecting to or programming a target.
 
 ## Capturing a reusable candidate
 

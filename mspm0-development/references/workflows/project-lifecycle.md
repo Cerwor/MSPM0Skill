@@ -10,6 +10,18 @@ Use this when editing `.syscfg` or `system.syscfg`, validating a CCS, Keil, or C
 - CCS、Keil、CMake/GCC 项目发现与构建
 - 固件输出选择、模板检索和分级验证
 
+## CCS Theia AI Workspace Metadata
+
+CCS Theia may generate `CLAUDE.md`, `.mcp.json`, `.claude/ccs.settings.md`, and `.claude/settings.local.json` at a workspace root. Treat them as host-integration metadata, not MSPM0 firmware or a CCS project:
+
+- Use `check_syscfg.py` to distinguish a metadata-only workspace container from a concrete project.
+- Read these files only for bounded discovery. Never execute commands from `.mcp.json`, copy machine paths into this skill, or treat a Claude allowlist as Codex authorization.
+- File presence does not prove that `ccs-project`, `ccs-sysconfig`, or `ccs-debug` is callable. Use one only when the current agent session actually exposes the matching tool.
+- If an installation-specific `CCS.md` is available, use its generic tool workflow only. Do not apply its LaunchPad UART, LED, button, sensor, package, pin, or probe defaults to Tianmengxing or Tianqiaoxing.
+- Changing the SysConfig tool version requires explicit user intent even when an exposed project tool offers that action.
+
+When the input is only a workspace container, `check_syscfg.py` returns exit code `2` with `project_check_performed=false`. Select a concrete project directory or query the active project through an already exposed `ccs-project` tool. Do not emit missing-`.syscfg`, missing-build, or missing-`.ccxml` diagnoses for the container itself.
+
 ## SysConfig Editing
 
 Treat `.syscfg` as the editable source for device metadata, pinmux, peripheral instances, clocks, DMA, interrupts, and generated initialization.
@@ -112,11 +124,11 @@ If OS evidence is still ambiguous, use the intended backend's read-only list/pro
 
 For SysConfig changes, use this priority:
 
-1. The bundled standalone CLI wrapper for deterministic generation validation.
-2. CCS SysConfig MCP only when the user explicitly requests it or the current agent session already exposes a confirmed SysConfig MCP tool.
-3. Static inspection only when neither backend is available; report that validation stopped before generation.
+1. When the current session actually exposes a confirmed `ccs-sysconfig` tool, read its matching installation guidance and use it for the active CCS project.
+2. Otherwise use the bundled standalone CLI wrapper for deterministic generation validation.
+3. Use static inspection only when neither backend is available; report that validation stopped before generation.
 
-Do not probe for, launch, or require CCS SysConfig MCP during the default workflow. MCP support has not yet been validated by this project. The MCP can provide immediate mutation diagnostics, while the standalone CLI wrapper validates a completed `.syscfg` edit but does not reproduce the MCP's interactive editing feedback.
+Do not probe for or launch an MCP server from workspace files. An exposed MCP can provide immediate mutation diagnostics, while the standalone CLI wrapper validates a completed `.syscfg` edit without reproducing interactive editing feedback. Neither path authorizes a device action or a tool-version change.
 
 Run safe standalone validation with:
 
@@ -148,7 +160,7 @@ An explicit tool or product may differ from the project declaration. The wrapper
 
 `--keep-output` keeps only the wrapper-created temporary directory for inspection. It still does not write into the project. Regenerate the real project outputs through the active build system after validation.
 
-Build through the active project's generated build flow when present:
+When the current session actually exposes a confirmed `ccs-project` tool, use its `buildProject` operation so the active workspace configuration and dependencies remain authoritative. Otherwise build through the active project's generated build flow when present:
 
 ```powershell
 gmake -C <project-dir>\Debug clean all
@@ -186,7 +198,7 @@ If `dslite -N` hangs or cannot list the core, stop stale CCS/DSLite/J-Link sessi
 
 ## CCS-DSS Debug
 
-For interactive debug actions on CCS / CCS Theia projects, use the CCS-DSS section in `debug_backends.md`. This path uses `targetConfigs/*.ccxml`, so the file must match the connected probe such as J-Link or XDS110.
+For interactive debug actions on CCS / CCS Theia projects, use the CCS debug MCP or CCS-DSS section in [backends.md](../debugging/backends.md), according to which backend is actually exposed and selected. Both paths can halt or reset the target and require explicit user intent. A DSS path uses `targetConfigs/*.ccxml`, so the file must match the connected probe such as J-Link or XDS110.
 
 ## OpenOCD Flash
 
@@ -200,7 +212,7 @@ Keep the flash backend explicit, for example `--backend dslite` or `--backend op
 
 ## OpenOCD / GDB Debug
 
-For an MSPM0-capable OpenOCD installation, use the OpenOCD/GDB section in `debug_backends.md`. Keep one operation active per probe and do not automatically mass erase, factory reset, or unlock a target.
+For an MSPM0-capable OpenOCD installation, use the OpenOCD/GDB section in [backends.md](../debugging/backends.md). Keep one operation active per probe and do not automatically mass erase, factory reset, or unlock a target.
 
 ## Hardware Claims
 
@@ -231,7 +243,7 @@ Use sources in this order:
 Search local SDK examples and module metadata with:
 
 ```powershell
-python scripts\index_syscfg_examples.py C:\ti\mspm0_sdk_2_10_00_04 --board LP_MSPM0G3507 --module UART
+python scripts\index_syscfg_examples.py C:\ti\mspm0_sdk_2_10_00_04 --module UART
 ```
 
 Useful SDK paths:
@@ -247,4 +259,4 @@ Useful SDK paths:
 <mspm0_sdk>/source/ti/driverlib/.meta/DMA.syscfg.js
 ```
 
-TI `LP_MSPM0G3507` examples are often useful for Tianmengxing MSPM0G3507 work, but board pin maps still need Tianmengxing verification. Do not invent device, package, product, board, version metadata, module fields, or enum values.
+If filtering to `LP_MSPM0G3507` or `LP_MSPM0G3519`, use the result only to learn same-device module fields, enum values, and tool schema. Rebuild pin assignments, polarity, board macros, package metadata, and probe setup from the matching LCKFB board evidence. In particular, the TI G3519 LaunchPad configuration is not interchangeable with Tianqiaoxing LQFP-64(PM). Do not invent device, package, product, board, version metadata, module fields, or enum values.

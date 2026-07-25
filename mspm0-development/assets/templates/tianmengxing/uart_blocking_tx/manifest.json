@@ -7,9 +7,11 @@
   "device": "MSPM0G3507",
   "package": "LQFP-64",
   "sdk": "MSPM0 SDK 2.10.00.04",
-  "sysconfig": "1.26.2",
+  "sysconfig": "1.27.0",
   "validated": true,
-  "validation_level": "hardware_serial",
+  "validation_level": "sysconfig_generated",
+  "prior_validation_level": "hardware_serial",
+  "physical_behavior_revalidated": false,
   "complexity": "basic",
   "clock": {
     "cpuclk_hz": 80000000,
@@ -19,7 +21,7 @@
   "pins": ["PB22", "PA10", "PA11"],
   "source_files": ["src/main.c"],
   "syscfg": "example.syscfg",
-  "generated_names": ["UART_0_INST", "UART_0_BAUD_RATE", "GPIO_UART_0_TX_PIN", "GPIO_UART_0_RX_PIN"],
+  "generated_names": ["UART_0_INST", "UART_0_BAUD_RATE", "GPIO_UART_0_TX_PIN", "GPIO_UART_0_RX_PIN", "LED_PORT", "LED_PIN_22_PIN"],
   "parameters": {
     "uart": "UART0",
     "baud": 115200,

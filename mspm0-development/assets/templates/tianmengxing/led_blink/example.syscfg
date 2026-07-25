@@ -1,28 +1,29 @@
 /**
- * Example SysConfig file for the LCKFB Tianmengxing MSPM0G3507 PB22 LED.
- * This pattern was validated on real hardware with MSPM0 SDK 2.10.00.04 and SysConfig 1.26.2.
+ * 嘉立创天猛星 MSPM0G3507 板载 PB22 LED 的 SysConfig 示例。
+ * 已使用 MSPM0 SDK 2.10.00.04 和 SysConfig 1.27.0 完成生成与编译验证。
  *
  * @cliArgs --device "MSPM0G350X" --part "Default" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
  * @v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
- * @versions {"tool":"1.26.2+4477"}
+ * @versions {"tool":"1.27.0+4565"}
  */
 
 const GPIO   = scripting.addModule("/ti/driverlib/GPIO", {}, false);
 const GPIO1  = GPIO.addInstance();
 const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
 
-GPIO1.$name                         = "LED";
-GPIO1.port                          = "PORTB";
-GPIO1.associatedPins[0].$name       = "PIN_22";
-GPIO1.associatedPins[0].assignedPin = "22";
+GPIO1.$name                          = "LED";
+GPIO1.associatedPins.create(1);
+GPIO1.associatedPins[0].$name        = "PIN_22";
+GPIO1.associatedPins[0].initialValue = "CLEARED";
+GPIO1.associatedPins[0].assignedPort = "PORTB";
+GPIO1.associatedPins[0].assignedPin  = "22";
+GPIO1.associatedPins[0].pin.$assign  = "PB22";
 
 const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
 
 SYSCTL.forceDefaultClkConfig = true;
 
-GPIO1.associatedPins[0].pin.$suggestSolution = "PB22";
 Board.peripheral.$suggestSolution            = "DEBUGSS";
 Board.peripheral.swclkPin.$suggestSolution   = "PA20";
 Board.peripheral.swdioPin.$suggestSolution   = "PA19";
 SYSCTL.peripheral.$suggestSolution           = "SYSCTL";
-

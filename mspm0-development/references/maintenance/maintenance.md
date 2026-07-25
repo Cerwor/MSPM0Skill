@@ -35,8 +35,8 @@ Do not add a second exhaustive routing table, duplicate public board scripts, ge
    python -B <skill-creator-root>\scripts\quick_validate.py .
    ```
 
-7. Synchronize only a validated tree into the personal skills directory.
-8. Run both validators against the installed copy and compare file hashes.
+7. Stop after repository validation when the skill is not being installed or released.
+8. Only when preparing an installation or release, synchronize a validated tree, run both validators against that artifact, and compare file hashes.
 
 ## Validation levels
 
@@ -45,7 +45,8 @@ Report levels independently: static inspection, SysConfig generation, compilatio
 ## Packaging rules
 
 - Required root entries: `SKILL.md`, `agents/`, `scripts/`, `references/`, and `assets/`.
-- No `README.md`, caches, editor metadata, temporary output, build directories, or board-local duplicate script trees.
+- The skill directory name must exactly match the `name` declared in `SKILL.md`.
+- No `README.md`, `CLAUDE.md`, `.mcp.json`, `.claude/`, caches, editor metadata, temporary output, build directories, or board-local duplicate script trees.
 - Long references include `## Scope` and `## Contents` near the top.
 - Markdown links and template source paths must resolve within the package.
 - Any absolute path in documentation must be a generic tool-location example, never a maintainer-local workspace path.

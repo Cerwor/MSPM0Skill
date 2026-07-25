@@ -8,6 +8,7 @@
 
 - SDK 例程与 SysConfig 版本差异
 - 输出、输入和中断配置
+- 基于生成时钟宏的软件闪烁时序
 - 生成宏核对与故障排查
 
 ## SDK Example
@@ -59,6 +60,17 @@ DL_GPIO_togglePins(GPIO_LEDS_PORT, GPIO_LEDS_USER_LED_1_PIN);
 ```
 
 > 注意：天猛星 PB22 LED 为高电平亮，与天巧星相反。
+
+## 软件闪烁时序
+
+把闪烁频率定义为一个完整亮灭周期的频率。GPIO 每半周期翻转一次，因此使用生成头中的 `CPUCLK_FREQ` 计算：
+
+```c
+#define LED_BLINK_HZ (1U)
+#define LED_HALF_PERIOD_CYCLES (CPUCLK_FREQ / (2U * LED_BLINK_HZ))
+```
+
+不要把 32 MHz 或 80 MHz 直接写进 `delay_cycles()`。这种忙等待适合 LED 冒烟测试；需要精确定时、低功耗或并行业务时改用 Timer。
 
 ## Button Input
 
