@@ -370,6 +370,171 @@ def parse_peripheral_pin_assigns(text: str) -> list[dict[str, str]]:
     return pins
 
 
+def c_identifier(value: str) -> str:
+    """将 SysConfig 名称转换为常见的生成代码标识符形式。"""
+
+    return re.sub(r"[^A-Za-z0-9_]", "_", value)
+
+
+def parse_gpio_pin_records(text: str) -> list[dict[str, object]]:
+    """提取显式锁定的 GPIO 引脚及其 SysConfig 名称。"""
+
+    records: list[dict[str, object]] = []
+    pattern = re.compile(
+        r"(?P<item>(?P<instance>[A-Za-z_][A-Za-z0-9_]*)"
+        r"\.associatedPins\[(?P<index>\d+)\])\.pin\.\$assign\s*=\s*"
+        r"\"(?P<physical>P[A-Z]\d+)\""
+    )
+    for match in pattern.finditer(text):
+        item = match.group("item")
+        instance = match.group("instance")
+
+        def assigned_string(expr: str) -> str:
+            value = re.search(re.escape(expr) + r"\s*=\s*\"([^\"]+)\"", text)
+            return value.group(1) if value else ""
+
+        instance_name = assigned_string(f"{instance}.$name") or instance
+        pin_name = assigned_string(f"{item}.$name")
+        initial_value = assigned_string(f"{item}.initialValue")
+        records.append(
+            {
+                "pin": match.group("physical"),
+                "function": "GPIO",
+                "instance": instance_name,
+                "signal": pin_name,
+                "initial_value": initial_value,
+                "expression": item,
+            }
+        )
+    return records
+
+
+def parse_cpuclk_frequency(headers: Iterable[Path]) -> int | None:
+    for header in headers:
+        match = re.search(r"^\s*#define\s+CPUCLK_FREQ\s+(\d+)", read_text(header), flags=re.MULTILINE)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def simple_delay_cycles(expression: str, source_text: str, cpuclk: int | None) -> int | None:
+    """只计算能直接证明的整数或 CPUCLK_FREQ/N 延时表达式。"""
+
+    value = expression.strip()
+    definitions = {
+        name: body.strip()
+        for name, body in re.findall(
+            r"^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)\s+([^\r\n/][^\r\n]*)$",
+            source_text,
+            flags=re.MULTILINE,
+        )
+    }
+    if value in definitions:
+        value = definitions[value]
+    value = value.strip().strip("()").strip()
+    integer = re.fullmatch(r"(\d+)[uUlL]*", value)
+    if integer:
+        return int(integer.group(1))
+    divided_clock = re.fullmatch(r"CPUCLK_FREQ\s*/\s*(\d+)[uUlL]*", value)
+    if divided_clock and cpuclk:
+        divisor = int(divided_clock.group(1))
+        return cpuclk // divisor if divisor else None
+    return None
+
+
+def summarize_pin_usage(
+    syscfg_files: Iterable[Path],
+    generated_files: Iterable[Path],
+    source_files: Iterable[Path],
+) -> list[dict[str, object]]:
+    """汇总有明确文件证据的引脚配置和简单软件行为。"""
+
+    generated_list = list(generated_files)
+    headers = [path for path in generated_list if path.name == "ti_msp_dl_config.h"]
+    generated_c_text = "\n".join(
+        read_text(path) for path in generated_list if path.name == "ti_msp_dl_config.c"
+    )
+    cpuclk = parse_cpuclk_frequency(headers)
+    source_texts = [(path, read_text(path)) for path in source_files]
+    summaries: list[dict[str, object]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for syscfg in syscfg_files:
+        text = read_text(syscfg)
+        gpio_records = parse_gpio_pin_records(text)
+        gpio_pins = {str(record["pin"]) for record in gpio_records}
+        for record in gpio_records:
+            instance = c_identifier(str(record["instance"]))
+            signal = c_identifier(str(record["signal"]))
+            macro_base = f"{instance}_{signal}" if signal else instance
+            direction = "unknown"
+            if re.search(rf"\bDL_GPIO_initDigitalOutput\s*\(\s*{re.escape(macro_base)}_IOMUX\s*\)", generated_c_text):
+                direction = "output"
+            elif re.search(rf"\bDL_GPIO_initDigitalInput\w*\s*\(\s*{re.escape(macro_base)}_IOMUX\b", generated_c_text):
+                direction = "input"
+
+            behavior = ""
+            frequency_hz: float | None = None
+            evidence: list[str] = [str(syscfg)]
+            port_macro = f"{instance}_PORT"
+            pin_macro = f"{macro_base}_PIN"
+            toggle_pattern = re.compile(
+                rf"\bDL_GPIO_togglePins\s*\(\s*{re.escape(port_macro)}\s*,\s*"
+                rf"{re.escape(pin_macro)}\s*\)"
+            )
+            for source, source_text in source_texts:
+                toggle = toggle_pattern.search(source_text)
+                if not toggle:
+                    continue
+                behavior = "software toggle"
+                evidence.append(str(source))
+                tail = source_text[toggle.end() : toggle.end() + 500]
+                delay = re.search(r"\bdelay_cycles\s*\(\s*([A-Za-z0-9_()/\s]+?)\s*\)", tail)
+                if delay:
+                    cycles = simple_delay_cycles(delay.group(1), source_text, cpuclk)
+                    if cycles and cpuclk:
+                        frequency_hz = cpuclk / (2.0 * cycles)
+                break
+
+            summary = {
+                **record,
+                "direction": direction,
+                "behavior": behavior,
+                "frequency_hz": frequency_hz,
+                "evidence": evidence,
+            }
+            key = (str(record["pin"]), str(record["function"]), str(record["instance"]))
+            if key not in seen:
+                summaries.append(summary)
+                seen.add(key)
+
+        for pin in parse_peripheral_pin_assigns(text):
+            physical = pin["pin"]
+            if physical in gpio_pins:
+                continue
+            expression = pin["expr"]
+            key = (physical, "peripheral", expression)
+            if key in seen:
+                continue
+            summaries.append(
+                {
+                    "pin": physical,
+                    "function": "peripheral",
+                    "instance": expression,
+                    "signal": expression.rsplit(".", 1)[-1],
+                    "initial_value": "",
+                    "expression": expression,
+                    "direction": "unknown",
+                    "behavior": "",
+                    "frequency_hz": None,
+                    "evidence": [str(syscfg)],
+                }
+            )
+            seen.add(key)
+
+    return summaries
+
+
 def parse_hfxt_status(text: str) -> dict[str, bool]:
     clock_tree_match = re.search(r"(?:const|let|var)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*system\.clockTree\[\s*[\"']HFXT[\"']\s*\]", text)
     clock_tree_enabled = False
@@ -757,7 +922,10 @@ def has_concrete_project_evidence(root: Path) -> bool:
     return False
 
 
-def check_project(root: Path) -> tuple[list[Message], dict[str, object]]:
+def check_project(
+    root: Path,
+    include_pin_summary: bool = False,
+) -> tuple[list[Message], dict[str, object]]:
     messages: list[Message] = []
     details: dict[str, object] = {}
 
@@ -925,6 +1093,12 @@ def check_project(root: Path) -> tuple[list[Message], dict[str, object]]:
     else:
         messages.append(Message("warning", "未发现 ti_msp_dl_config.c/.h，工程可能尚未生成或尚未编译。"))
 
+    if include_pin_summary:
+        pin_summary = summarize_pin_usage(syscfg_files, generated, source_files)
+        for item in pin_summary:
+            item["evidence"] = [rel(Path(path), root) for path in item["evidence"]]
+        details["pin_summary"] = pin_summary
+
     headers = [p for p in generated if p.name == "ti_msp_dl_config.h"]
     header_init_names = parse_header_init_names(headers)
     details["header_init_names"] = sorted(header_init_names)
@@ -1015,18 +1189,33 @@ def check_project(root: Path) -> tuple[list[Message], dict[str, object]]:
 def add_probe_check(root: Path, messages: list[Message], details: dict[str, object]) -> None:
     hints = details.setdefault("validation_hints", {})
     assert isinstance(hints, dict)
+
+    def suppress_ccs_device_hints(reason: str) -> None:
+        for key in (
+            "dslite_list_cores",
+            "ccs_dss_inspect_target",
+            "flash",
+            "ccs_dss_run_to_main",
+            "dslite_flash_fallback",
+        ):
+            hints.pop(key, None)
+        hints["probe_mismatch"] = reason
+
     detector = Path(__file__).resolve().with_name("detect_probe.py")
     hints["detect_probe"] = f'python "{detector}"'
     try:
         probes = detect_probes()
     except Exception as exc:  # Keep static checks usable when OS probe enumeration is unavailable.
         details["connected_probes"] = {"error": str(exc), "probes": []}
+        details["probe_config_match"] = {"status": "unavailable", "reason": str(exc)}
         messages.append(Message("warning", f"Connected probe detection failed: {exc}"))
         return
 
     serialized = [asdict(probe) for probe in probes]
     details["connected_probes"] = {"probes": serialized}
     if not probes:
+        details["probe_config_match"] = {"status": "unavailable", "reason": "no supported probe identified"}
+        suppress_ccs_device_hints("Stop before flashing. Probe/config matching is unavailable.")
         messages.append(
             Message(
                 "warning",
@@ -1036,6 +1225,8 @@ def add_probe_check(root: Path, messages: list[Message], details: dict[str, obje
         return
     if len(probes) > 1:
         kinds = ", ".join(probe.kind for probe in probes)
+        details["probe_config_match"] = {"status": "ambiguous", "reason": f"multiple probes: {kinds}"}
+        suppress_ccs_device_hints("Stop before flashing. Select one connected probe explicitly.")
         messages.append(Message("warning", f"Multiple connected debug probes were detected: {kinds}. Ask the user which probe to use before flashing."))
     for probe in probes:
         suffix = f", USB {probe.usb_id}" if probe.usb_id else ""
@@ -1061,17 +1252,42 @@ def add_probe_check(root: Path, messages: list[Message], details: dict[str, obje
         if name in configured
     }
     mismatch = bool(configured_probe_kinds) and connected.kind not in configured_probe_kinds
+    if len(ccxmls) != 1:
+        details["probe_config_match"] = {
+            "status": "ambiguous",
+            "reason": f"target config count is {len(ccxmls)}",
+        }
+    elif not configured_probe_kinds:
+        details["probe_config_match"] = {
+            "status": "unverified",
+            "reason": "target config probe type was not recognized",
+        }
+        suppress_ccs_device_hints(
+            "Stop before flashing. The target configuration probe type was not recognized."
+        )
+    elif mismatch:
+        details["probe_config_match"] = {
+            "status": "mismatch",
+            "connected": connected.kind,
+            "configured": sorted(configured_probe_kinds),
+        }
+    else:
+        details["probe_config_match"] = {
+            "status": "matched",
+            "connected": connected.kind,
+            "configured": sorted(configured_probe_kinds),
+        }
+        messages.append(
+            Message(
+                "ok",
+                f"Connected probe {connected.kind} matches the single CCS target configuration.",
+            )
+        )
     if mismatch:
         expected = ", ".join(sorted(configured))
-        for key in (
-            "dslite_list_cores",
-            "ccs_dss_inspect_target",
-            "flash",
-            "ccs_dss_run_to_main",
-            "dslite_flash_fallback",
-        ):
-            hints.pop(key, None)
-        hints["probe_mismatch"] = "Stop before flashing. Ask the user to confirm the intended probe/backend."
+        suppress_ccs_device_hints(
+            "Stop before flashing. Ask the user to confirm the intended probe/backend."
+        )
         messages.append(
             Message(
                 "warning",
@@ -1100,6 +1316,32 @@ def print_text(root: Path, messages: list[Message], details: dict[str, object]) 
     for msg in messages:
         path = f" [{msg.path}]" if msg.path else ""
         print(f"{msg.level.upper():7} {msg.text}{path}")
+
+    pin_summary = details.get("pin_summary")
+    if isinstance(pin_summary, list):
+        print()
+        print("Pin summary:")
+        if not pin_summary:
+            print("- No explicit pin assignments could be summarized.")
+        for item in pin_summary:
+            if not isinstance(item, dict):
+                continue
+            function = str(item.get("function", "unknown"))
+            direction = str(item.get("direction", "unknown"))
+            instance = str(item.get("instance", ""))
+            signal = str(item.get("signal", ""))
+            description = f"{function} {direction}".strip()
+            if instance or signal:
+                label = "/".join(value for value in (instance, signal) if value)
+                description += f" ({label})"
+            behavior = str(item.get("behavior", ""))
+            if behavior:
+                description += f", {behavior}"
+            frequency = item.get("frequency_hz")
+            if isinstance(frequency, (int, float)):
+                formatted = f"{frequency:.3g}"
+                description += f", ~{formatted} Hz"
+            print(f"- {item.get('pin', 'unknown')}: {description}")
 
     ccs_tools = details.get("ccs_tools", {})
     if isinstance(ccs_tools, dict):
@@ -1156,6 +1398,11 @@ def main() -> int:
     parser.add_argument("project", nargs="?", default=".", help="Path to a project or CCS Theia workspace directory.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     parser.add_argument(
+        "--pin-summary",
+        action="store_true",
+        help="Summarize explicit pin assignments and directly evidenced simple GPIO behavior.",
+    )
+    parser.add_argument(
         "--detect-probe",
         action="store_true",
         help="Read OS PnP/USB evidence and compare it with project hints; this does not connect to the target.",
@@ -1170,7 +1417,7 @@ def main() -> int:
         args.detect_probe = True
 
     root = Path(args.project).resolve()
-    messages, details = check_project(root)
+    messages, details = check_project(root, include_pin_summary=args.pin_summary)
     project_check_performed = details.get("project_check_performed", True) is True
     if args.detect_probe and project_check_performed:
         add_probe_check(root, messages, details)

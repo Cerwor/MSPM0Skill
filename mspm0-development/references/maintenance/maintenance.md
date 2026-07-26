@@ -8,7 +8,8 @@ Use this file when changing, validating, packaging, or installing this skill. It
 
 | Concern | Unique owner |
 | --- | --- |
-| Task routing and safety summary | `SKILL.md` |
+| Common routing and safety summary | `SKILL.md` |
+| Detailed task-to-reference index | `references/task-routing.md` |
 | Project inspection/build lifecycle | `references/workflows/project-lifecycle.md` |
 | New-project creation | `references/workflows/scaffolding.md` |
 | DriverLib/SysConfig runtime rules | `references/runtime/driverlib-runtime.md` |
@@ -21,7 +22,7 @@ Use this file when changing, validating, packaging, or installing this skill. It
 | Executable behavior | one public script in `scripts/` |
 | Copyable code/config | `assets/templates/<board>/<template>/` |
 
-Do not add a second exhaustive routing table, duplicate public board scripts, generated build output, or prose snippets under `assets/`. Keep `references/runtime/sysconfig-patterns.md` as the only concise pattern view; complete copyable configuration remains owned by `assets/templates/`.
+Do not duplicate the detailed routing index in `SKILL.md`, add duplicate public board scripts, generated build output, or prose snippets under `assets/`. Keep `references/runtime/sysconfig-patterns.md` as the only concise pattern view; complete copyable configuration remains owned by `assets/templates/`.
 
 ## Change workflow
 

@@ -7,6 +7,7 @@ Use this when editing `.syscfg` or `system.syscfg`, validating a CCS, Keil, or C
 ## Contents
 
 - SysConfig 编辑、静态检查和生成
+- 纯源码快速变更
 - CCS CLI 工具发现
 - CCS、Keil、CMake/GCC 项目发现与构建
 - 固件输出识别、模板检索和分级验证
@@ -95,6 +96,27 @@ Avoid unnecessary edits to `.project`, `.cproject`, `.ccsproject`, `.settings/`,
 - For multi-module projects, find the existing peripheral wrapper, board file, or application module that owns similar behavior before adding new code.
 - For timing/control features, confirm whether the period is controlled by timer ISR, RTOS task delay, hardware PWM/ADC trigger chain, or main-loop polling.
 
+## Source-Only Fast Change
+
+Use this path when the requested behavior is owned entirely by existing `.c/.h`
+code and no `.syscfg`, pin, clock, peripheral, device, package, probe, or build
+configuration changes are needed:
+
+1. Run `python -B scripts\check_syscfg.py <project-dir> --detect-probe`.
+2. Inspect only the source owner and generated macros it uses.
+3. Make the minimal source change.
+4. Run the exact build command reported by the checker.
+5. If the user requested programming, use the reported `flash` command directly
+   when there is exactly one `.ccxml`, one `.out`, and the detected probe matches
+   the target configuration.
+6. Ask for physical observation and report it separately.
+
+The checker output is the preferred command source. Do not read the rest of this
+file or `backends.md` merely to reconstruct commands it already resolved. Load
+`backends.md` only when selection is ambiguous, probe/config evidence conflicts,
+the checker cannot emit a command, the device action fails, or advanced debug is
+needed.
+
 ## CCS CLI Tool Discovery
 
 Do not assume `gmake`, `DSLite`, or `sysconfig_cli.bat` is on `PATH`. Run
@@ -121,6 +143,15 @@ Run the static checker first:
 ```powershell
 python scripts\check_syscfg.py <project-dir>
 ```
+
+Choose the shortest valid branch:
+
+| Changed files | Required path |
+| --- | --- |
+| `.c/.h` only | Static inspection, then authoritative project build; skip standalone SysConfig validation |
+| `.syscfg` | Validate generation before or through the authoritative build, then compile/link |
+| Build/tool configuration | Re-run checker, then validate the affected build path |
+| Probe/`.ccxml`/output selection | Re-run checker with `--detect-probe`; load `backends.md` on ambiguity or mismatch |
 
 For an existing CCS project with both `Debug/makefile` and
 `Debug/subdir_rules.mk`, prefer the reported absolute `gmake` command:
@@ -194,9 +225,14 @@ If no configured build directory exists, configure one using the project's docum
 
 ## Device-action handoff
 
-This document stops at project discovery, SysConfig generation, build, and output identification. For USB/PnP probe detection, backend selection, flash, target connection, register inspection, reset, halt, breakpoints, and recovery, use [backends.md](../debugging/backends.md) as the single owner.
+For a user-requested flash, the `check_syscfg.py --detect-probe` command is the
+normal handoff. Use its `flash` command without loading another reference when
+there is one `.ccxml`, one `.out`, and its probe comparison reports a match.
 
-Do not infer permission for a device action from a successful build or from the presence of `.ccxml`/OpenOCD configuration. Confirm the physical probe and selected firmware output before following that reference.
+Use [backends.md](../debugging/backends.md) for ambiguous selection, mismatch,
+connection/reset failure, register inspection, breakpoints, recovery, or a
+backend command not emitted by the checker. A successful build or file presence
+alone never authorizes a device action.
 
 ## Hardware Claims
 
