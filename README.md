@@ -11,7 +11,8 @@
 - 使用本工程生成的 `ti_msp_dl_config.h/.c` 名称编写 DriverLib 代码。
 - 创建或复用最小工程、GPIO、PWM、Timer IRQ 和 UART 模板。
 - 提供 GPIO、80 MHz 时钟、UART、Timer IRQ 和空骨架的简洁 SysConfig 局部模式。
-- 检测 J-Link、XDS110 等探针，使用 CCS/DSLite、CCS DSS 或 OpenOCD 等调试后端，并保持烧录与调试操作的授权边界。
+- 从 CCS 工程构建规则发现 gmake、SysConfig、CCS scripting 和 DSLite 的实际路径，不依赖这些工具已加入 `PATH`。
+- 检测 J-Link、XDS110 等探针；对带匹配 `.ccxml` 的 CCS 工程优先使用结构化 CCS-DSS 烧录/调试，DSLite 仅作已发现时的备用路径，并保持设备操作的授权边界。
 - 分别报告静态检查、SysConfig 生成、编译、烧录、串口和实物行为证据。
 - 支持 GPIO、UART、SPI、I2C、ADC、Timer、PWM、DMA、QEI 等常见 MSPM0 开发任务。
 
@@ -432,7 +433,7 @@ python -B scripts\validate_skill.py .
 python -B scripts\list_examples.py
 ```
 
-其中单元测试覆盖捕获器的 schema 2 端到端契约、负向校验规则，以及使用 DriverLib 桩编译真实 `UART.c` 的主机端接收/DMA 状态机；它不连接开发板。
+其中单元测试覆盖捕获器的 schema 2 端到端契约、负向校验规则、CCS 工具发现与烧录路由，以及使用 DriverLib 桩编译真实 `UART.c` 的主机端接收/DMA 状态机；它不连接开发板。
 
 如果本机有系统 `skill-creator`，还应运行其 `quick_validate.py`：
 

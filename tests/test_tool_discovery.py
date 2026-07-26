@@ -1,8 +1,10 @@
 import importlib.util
+import io
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -23,6 +25,8 @@ def load_script(name: str):
 
 
 CCS_DSS = load_script("ccs_dss_debug.py")
+CHECK_SYSCFG = load_script("check_syscfg.py")
+DETECT_PROBE = load_script("detect_probe.py")
 RUN_SYSCONFIG = load_script("run_sysconfig.py")
 
 
@@ -61,6 +65,119 @@ class CcsDssDiscoveryTests(unittest.TestCase):
             ):
                 selected = CCS_DSS.find_run_bat(None, project)
             self.assertEqual(selected.resolve(), run_bat.resolve())
+
+
+class CcsToolDiscoveryTests(unittest.TestCase):
+    def make_project(self, root: Path, include_dslite: bool = True) -> tuple[Path, Path]:
+        project = root / "project"
+        debug_dir = project / "Debug"
+        target_dir = project / "targetConfigs"
+        debug_dir.mkdir(parents=True)
+        target_dir.mkdir()
+        (project / "empty.syscfg").write_text(
+            '//@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)"\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+        (debug_dir / "makefile").write_text("all:\n", encoding="utf-8", newline="\n")
+        (debug_dir / "firmware.out").write_bytes(b"ELF")
+        (target_dir / "target.ccxml").write_text(
+            "<configurations/>\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        ccs_root = root / "MSPSDK" / "CCS" / "ccs"
+        sysconfig = ccs_root / "utils" / "sysconfig_1.27.0" / "sysconfig_cli.bat"
+        gmake = ccs_root / "utils" / "bin" / "gmake.exe"
+        run_bat = ccs_root / "scripting" / "run.bat"
+        for path in (sysconfig, gmake, run_bat):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"tool")
+        if include_dslite:
+            dslite = ccs_root / "ccs_base" / "DebugServer" / "bin" / "DSLite.exe"
+            dslite.parent.mkdir(parents=True)
+            dslite.write_bytes(b"tool")
+
+        build_rule = (
+            f'"{sysconfig.as_posix()}" --script "{(project / "empty.syscfg").as_posix()}" '
+            '--compiler ticlang\n'
+        )
+        (debug_dir / "subdir_rules.mk").write_text(
+            build_rule,
+            encoding="utf-8",
+            newline="\n",
+        )
+        return project, ccs_root
+
+    def discovery_context(self):
+        clean_env = {
+            variable: ""
+            for variable in (
+                *CHECK_SYSCFG.CCS_ROOT_ENV_VARS,
+                "TI_ROOT",
+            )
+        }
+        return (
+            mock.patch.dict(os.environ, clean_env, clear=False),
+            mock.patch.object(CHECK_SYSCFG.shutil, "which", return_value=None),
+        )
+
+    def test_check_syscfg_discovers_exact_ccs_tools_and_prefers_dss_flash(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mspm0-tool-layout-") as temp_dir:
+            project, ccs_root = self.make_project(Path(temp_dir))
+            env_patch, which_patch = self.discovery_context()
+            with env_patch, which_patch:
+                tools = CHECK_SYSCFG.discover_ccs_tools(project)
+                hints = CHECK_SYSCFG.find_validation_hints(project, tools)
+
+            for name in ("sysconfig_cli", "gmake", "ccs_run", "dslite"):
+                self.assertEqual(tools[name]["status"], "found")
+            self.assertEqual(
+                Path(str(tools["gmake"]["path"])),
+                (ccs_root / "utils" / "bin" / "gmake.exe").resolve(),
+            )
+            self.assertIn("ccs_dss_debug.py", hints["flash"])
+            self.assertIn('load --reset "System Reset" --leave-running', hints["flash"])
+            self.assertIn("dslite_flash_fallback", hints)
+            self.assertIn("sysconfig_isolated", hints)
+            self.assertNotIn("sysconfig_validate", hints)
+            self.assertTrue(hints["gmake"].startswith(f'"{tools["gmake"]["path"]}"'))
+
+    def test_missing_dslite_suppresses_only_dslite_hints(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mspm0-tool-missing-") as temp_dir:
+            project, _ccs_root = self.make_project(Path(temp_dir), include_dslite=False)
+            env_patch, which_patch = self.discovery_context()
+            with env_patch, which_patch:
+                tools = CHECK_SYSCFG.discover_ccs_tools(project)
+                hints = CHECK_SYSCFG.find_validation_hints(project, tools)
+
+            self.assertEqual(tools["dslite"]["status"], "not_found")
+            self.assertIn("flash", hints)
+            self.assertNotIn("dslite_list_cores", hints)
+            self.assertNotIn("dslite_flash_fallback", hints)
+
+
+class ProbePresentationTests(unittest.TestCase):
+    def test_known_vid_uses_usb_vendor_in_text_output(self) -> None:
+        probe = DETECT_PROBE.Probe(
+            kind="jlink",
+            display_name="SEGGER J-Link",
+            manufacturer="localized host controller",
+            usb_vendor=DETECT_PROBE.usb_vendor_name("1366:0105"),
+            usb_id="1366:0105",
+            serial_ports=["COM5"],
+            confidence="high",
+            recommended_backend="ccs_dss_or_vendor_tool",
+            recommended_config="",
+            evidence=[],
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            DETECT_PROBE.print_text([probe])
+        rendered = output.getvalue()
+        self.assertIn("USB vendor: SEGGER", rendered)
+        self.assertNotIn("localized host controller", rendered)
 
 
 class SysConfigSelectionTests(unittest.TestCase):

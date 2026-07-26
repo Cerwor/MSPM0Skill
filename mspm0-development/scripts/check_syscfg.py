@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -56,6 +57,13 @@ OPENOCD_CONTENT_PATTERNS = (
 )
 CCS_AI_SERVER_NAMES = {"ccs-debug", "ccs-project", "ccs-sysconfig"}
 CCS_AI_SKILL_RE = re.compile(r"ti-ccstudio-[A-Za-z0-9_.-]+", flags=re.IGNORECASE)
+CCS_ROOT_ENV_VARS = ("CCS_ROOT", "CCS_HOME", "CCS_INSTALL_DIR")
+CCS_BUILD_RULE_FILES = (
+    Path("Debug/subdir_rules.mk"),
+    Path("Release/subdir_rules.mk"),
+    Path("Debug/makefile"),
+    Path("Release/makefile"),
+)
 
 
 @dataclass
@@ -74,6 +82,145 @@ def rel(path: Path, root: Path) -> str:
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def ccs_root_from_tool_path(path: Path) -> Path | None:
+    parts = path.parts
+    for index in range(len(parts) - 1, -1, -1):
+        if parts[index].lower() != "ccs":
+            continue
+        if index + 1 < len(parts) and parts[index + 1].lower() in {
+            "utils",
+            "tools",
+            "ccs_base",
+            "scripting",
+        }:
+            return Path(*parts[: index + 1])
+    return None
+
+
+def add_tool_candidate(
+    candidates: dict[str, list[tuple[int, Path, str]]],
+    name: str,
+    path: Path,
+    source: str,
+    priority: int,
+) -> None:
+    candidates.setdefault(name, []).append((priority, path, source))
+
+
+def add_ccs_root_candidates(
+    candidates: dict[str, list[tuple[int, Path, str]]],
+    ccs_root: Path,
+    source: str,
+    priority: int,
+) -> None:
+    add_tool_candidate(candidates, "gmake", ccs_root / "utils" / "bin" / "gmake.exe", source, priority)
+    add_tool_candidate(
+        candidates,
+        "dslite",
+        ccs_root / "ccs_base" / "DebugServer" / "bin" / "DSLite.exe",
+        source,
+        priority,
+    )
+    add_tool_candidate(candidates, "ccs_run", ccs_root / "scripting" / "run.bat", source, priority)
+
+
+def resolve_tool_record(items: list[tuple[int, Path, str]]) -> dict[str, object]:
+    existing: dict[str, tuple[int, Path, str]] = {}
+    for priority, path, source in items:
+        if not path.is_file():
+            continue
+        resolved = path.resolve()
+        key = os.path.normcase(str(resolved))
+        current = existing.get(key)
+        if current is None or priority < current[0]:
+            existing[key] = (priority, resolved, source)
+    if not existing:
+        return {"status": "not_found"}
+    best_priority = min(item[0] for item in existing.values())
+    best = [item for item in existing.values() if item[0] == best_priority]
+    if len(best) > 1:
+        return {
+            "status": "ambiguous",
+            "candidates": sorted(str(item[1]) for item in best),
+        }
+    _priority, path, source = best[0]
+    return {
+        "status": "found",
+        "path": str(path),
+        "source": source,
+    }
+
+
+def discover_ccs_tools(root: Path) -> dict[str, dict[str, object]]:
+    candidates: dict[str, list[tuple[int, Path, str]]] = {
+        "sysconfig_cli": [],
+        "gmake": [],
+        "dslite": [],
+        "ccs_run": [],
+    }
+    for relative_path in CCS_BUILD_RULE_FILES:
+        build_file = root / relative_path
+        if not build_file.is_file():
+            continue
+        source = f"project build rule: {relative_path.as_posix()}"
+        for match in re.finditer(r'"(?P<path>[A-Za-z]:[\\/][^"\r\n]+)"', read_text(build_file)):
+            tool_path = Path(match.group("path").replace("/", "\\"))
+            if tool_path.name.lower() == "sysconfig_cli.bat":
+                add_tool_candidate(candidates, "sysconfig_cli", tool_path, source, 0)
+            ccs_root = ccs_root_from_tool_path(tool_path)
+            if ccs_root is not None:
+                add_ccs_root_candidates(candidates, ccs_root, source, 0)
+
+    for variable in CCS_ROOT_ENV_VARS:
+        value = os.environ.get(variable)
+        if not value:
+            continue
+        configured = Path(os.path.expandvars(os.path.expanduser(value)))
+        roots = [configured]
+        if configured.name.lower() != "ccs":
+            roots.append(configured / "ccs")
+        for ccs_root in roots:
+            add_ccs_root_candidates(candidates, ccs_root, f"environment: {variable}", 1)
+
+    path_names = {
+        "sysconfig_cli": ("sysconfig_cli.bat",),
+        "gmake": ("gmake.exe", "gmake"),
+        "dslite": ("DSLite.exe", "dslite"),
+    }
+    for name, executable_names in path_names.items():
+        for executable_name in executable_names:
+            value = shutil.which(executable_name)
+            if value:
+                add_tool_candidate(candidates, name, Path(value), "PATH", 1)
+
+    if os.name == "nt":
+        ti_root = Path(os.environ.get("TI_ROOT", r"C:\ti"))
+        if ti_root.is_dir():
+            for ccs_root in ti_root.glob("ccs*/ccs"):
+                add_ccs_root_candidates(candidates, ccs_root, "common TI install root", 2)
+                for sysconfig_cli in ccs_root.glob("utils/sysconfig_*/sysconfig_cli.bat"):
+                    add_tool_candidate(
+                        candidates,
+                        "sysconfig_cli",
+                        sysconfig_cli,
+                        "common TI install root",
+                        2,
+                    )
+
+    return {
+        name: resolve_tool_record(items)
+        for name, items in candidates.items()
+    }
+
+
+def found_tool_path(tools: dict[str, dict[str, object]], name: str) -> Path | None:
+    record = tools.get(name, {})
+    if record.get("status") != "found":
+        return None
+    value = record.get("path")
+    return Path(str(value)) if value else None
 
 
 def find_syscfg_files(root: Path) -> list[Path]:
@@ -258,43 +405,68 @@ def parse_source_init_calls(sources: Iterable[Path]) -> dict[str, list[str]]:
     return calls
 
 
-def find_validation_hints(root: Path) -> dict[str, str]:
+def find_validation_hints(
+    root: Path,
+    tools: dict[str, dict[str, object]] | None = None,
+) -> dict[str, str]:
     hints: dict[str, str] = {}
+    tools = tools or discover_ccs_tools(root)
     sysconfig_script = Path(__file__).resolve().with_name("run_sysconfig.py")
     syscfg_files = find_syscfg_files(root)
+    has_ccs_build = (root / "Debug" / "makefile").is_file() and (
+        root / "Debug" / "subdir_rules.mk"
+    ).is_file()
     if len(syscfg_files) == 1:
-        hints["sysconfig_validate"] = f'python "{sysconfig_script}" "{root}"'
+        key = "sysconfig_isolated" if has_ccs_build else "sysconfig_validate"
+        hints[key] = f'python "{sysconfig_script}" "{root}"'
     elif len(syscfg_files) > 1:
         hints["sysconfig_selection"] = (
             "Multiple .syscfg files found. Run run_sysconfig.py with --script <project-relative.syscfg>."
         )
     makefile = root / "Debug" / "subdir_rules.mk"
     if makefile.exists():
-        text = read_text(makefile)
-        sysconfig = re.search(r'"[^"]*sysconfig_cli\.bat"[^\r\n]+', text)
-        if sysconfig:
-            hints["sysconfig_cli"] = sysconfig.group(0).strip()
-        hints["gmake"] = f'gmake -C "{root / "Debug"}" clean all'
+        gmake = found_tool_path(tools, "gmake")
+        if gmake:
+            hints["gmake"] = f'"{gmake}" -C "{root / "Debug"}" clean all'
+        else:
+            hints["gmake_unavailable"] = (
+                "gmake was not found in PATH or the CCS installation derived from project build rules; "
+                "build through the active CCS project."
+            )
 
     ccxmls = find_target_configs(root)
     outputs = find_output_files(root)
-    dslite_flash_outputs = [p for p in outputs if p.suffix.lower() == ".out"] or outputs
+    ccs_outputs = [p for p in outputs if p.suffix.lower() == ".out"]
     openocd_flash_outputs = [p for p in outputs if p.suffix.lower() in {".elf", ".hex", ".bin"}]
+    dss_script = Path(__file__).resolve().with_name("ccs_dss_debug.py")
+    dslite = found_tool_path(tools, "dslite")
     if len(ccxmls) == 1:
-        hints["list_debug_cores"] = f'dslite -c "{ccxmls[0]}" -N'
-        dss_script = Path(__file__).resolve().with_name("ccs_dss_debug.py")
         hints["ccs_dss_inspect_target"] = f'python "{dss_script}" "{root}" inspect-target --leave-running'
+        if dslite:
+            hints["dslite_list_cores"] = f'"{dslite}" -c "{ccxmls[0]}" -N'
     elif len(ccxmls) > 1:
         hints["ccs_target_config_selection"] = (
             "Multiple CCS targetConfigs/*.ccxml files found. Ask the user which probe/config to use before running DSLite or CCS-DSS commands."
         )
-    if len(ccxmls) == 1 and len(dslite_flash_outputs) == 1:
-        hints["flash"] = f'dslite -c "{ccxmls[0]}" -e -r 2 -u "{dslite_flash_outputs[0]}"'
-        hints["ccs_dss_run_to_main"] = (
-            f'python "{dss_script}" "{root}" run-to-symbol --symbol main --load --reset "System Reset"'
+    if len(ccxmls) == 1 and len(ccs_outputs) == 1:
+        output = ccs_outputs[0]
+        hints["flash"] = (
+            f'python "{dss_script}" "{root}" --out "{output}" '
+            'load --reset "System Reset" --leave-running'
         )
-    elif len(ccxmls) == 1 and len(dslite_flash_outputs) > 1:
-        hints["flash"] = "Multiple program outputs found. Choose the intended output explicitly before flashing with DSLite."
+        hints["ccs_dss_run_to_main"] = (
+            f'python "{dss_script}" "{root}" --out "{output}" '
+            'run-to-symbol --symbol main --symbols --reset "System Reset" --leave-running'
+        )
+        if dslite:
+            hints["dslite_flash_fallback"] = (
+                f'"{dslite}" -c "{ccxmls[0]}" -e -r 2 -u "{output}"'
+            )
+    elif len(ccxmls) == 1 and len(ccs_outputs) > 1:
+        hints["flash_selection"] = (
+            "Multiple CCS .out files found. Choose the intended output explicitly with "
+            "ccs_dss_debug.py --out <path> load."
+        )
 
     keil_projects = find_keil_projects(root)
     if keil_projects:
@@ -780,8 +952,27 @@ def check_project(root: Path) -> tuple[list[Message], dict[str, object]]:
     makefile = root / "Debug" / "makefile"
     subdir_rules = root / "Debug" / "subdir_rules.mk"
     has_ccs_build = makefile.exists() and subdir_rules.exists()
+    ccs_tools = discover_ccs_tools(root)
+    details["ccs_tools"] = ccs_tools
     if has_ccs_build:
-        messages.append(Message("ok", "Debug 构建文件已存在，可以尝试使用 gmake -C Debug clean all。", "Debug"))
+        gmake = found_tool_path(ccs_tools, "gmake")
+        if gmake:
+            messages.append(
+                Message(
+                    "ok",
+                    f"Debug 构建文件已存在；已发现 gmake：{gmake}。",
+                    "Debug",
+                )
+            )
+        else:
+            messages.append(
+                Message(
+                    "warning",
+                    "Debug 构建文件已存在，但未在 PATH 或工程构建规则对应的 CCS 安装中找到 gmake；"
+                    "请通过活动 CCS 工程构建。",
+                    "Debug",
+                )
+            )
         if has_duplicate_linker_cmd_inputs(root):
             messages.append(Message("warning", "Debug/makefile 同时引用 ../device_linker.cmd 和 ./device_linker.cmd；这可能导致 gmake clean all 失败或重复链接 linker cmd。优先让 CCS 重新生成构建文件，临时 CLI 验证时避免重复输入。", "Debug/makefile"))
     if keil_projects:
@@ -813,11 +1004,11 @@ def check_project(root: Path) -> tuple[list[Message], dict[str, object]]:
     elif keil_projects:
         messages.append(Message("info", "同时发现 Keil/uVision 工程；如果当前使用 Keil 工作流，请确认 `.uvprojx` 和 Keil 调试器配置。"))
     if not ccxmls and not keil_projects and not cmake_info["uses_openocd"]:
-        messages.append(Message("warning", "未发现 targetConfigs/*.ccxml；DSLite 烧录需要目标配置文件。"))
+        messages.append(Message("warning", "未发现 targetConfigs/*.ccxml；CCS-DSS 或 DSLite 烧录需要目标配置文件。"))
     elif cmake_info["uses_openocd"] and not ccxmls:
         messages.append(Message("info", "未发现 targetConfigs/*.ccxml；当前更像 OpenOCD 烧录路径，不需要 CCS targetConfigs。"))
 
-    details["validation_hints"] = find_validation_hints(root)
+    details["validation_hints"] = find_validation_hints(root, ccs_tools)
     return messages, details
 
 
@@ -872,7 +1063,13 @@ def add_probe_check(root: Path, messages: list[Message], details: dict[str, obje
     mismatch = bool(configured_probe_kinds) and connected.kind not in configured_probe_kinds
     if mismatch:
         expected = ", ".join(sorted(configured))
-        for key in ("list_debug_cores", "ccs_dss_inspect_target", "flash", "ccs_dss_run_to_main"):
+        for key in (
+            "dslite_list_cores",
+            "ccs_dss_inspect_target",
+            "flash",
+            "ccs_dss_run_to_main",
+            "dslite_flash_fallback",
+        ):
             hints.pop(key, None)
         hints["probe_mismatch"] = "Stop before flashing. Ask the user to confirm the intended probe/backend."
         messages.append(
@@ -904,24 +1101,48 @@ def print_text(root: Path, messages: list[Message], details: dict[str, object]) 
         path = f" [{msg.path}]" if msg.path else ""
         print(f"{msg.level.upper():7} {msg.text}{path}")
 
+    ccs_tools = details.get("ccs_tools", {})
+    if isinstance(ccs_tools, dict):
+        found_tools = {
+            name: record
+            for name, record in ccs_tools.items()
+            if isinstance(record, dict) and record.get("status") == "found"
+        }
+        if found_tools:
+            labels = {
+                "sysconfig_cli": "SysConfig CLI",
+                "gmake": "gmake",
+                "dslite": "DSLite fallback",
+                "ccs_run": "CCS scripting run.bat",
+            }
+            print()
+            print("Detected CCS tools:")
+            for name in ("sysconfig_cli", "gmake", "ccs_run", "dslite"):
+                record = found_tools.get(name)
+                if record:
+                    print(f"- {labels[name]}: {record['path']} ({record['source']})")
+
     hints = details.get("validation_hints", {})
     if isinstance(hints, dict) and hints:
         print()
         print("Suggested CLI validation chain:")
         for key in (
             "detect_probe",
-            "sysconfig_validate",
-            "sysconfig_selection",
-            "sysconfig_cli",
             "gmake",
+            "gmake_unavailable",
+            "sysconfig_validate",
+            "sysconfig_isolated",
+            "sysconfig_selection",
             "cmake_configure",
             "cmake_build",
             "keil_build",
             "ccs_target_config_selection",
-            "list_debug_cores",
+            "dslite_list_cores",
             "ccs_dss_inspect_target",
             "flash",
             "ccs_dss_run_to_main",
+            "dslite_flash_fallback",
+            "flash_selection",
             "openocd_inspect_target",
             "openocd_flash",
             "probe_mismatch",

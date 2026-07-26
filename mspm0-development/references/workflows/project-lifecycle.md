@@ -7,6 +7,7 @@ Use this when editing `.syscfg` or `system.syscfg`, validating a CCS, Keil, or C
 ## Contents
 
 - SysConfig 编辑、静态检查和生成
+- CCS CLI 工具发现
 - CCS、Keil、CMake/GCC 项目发现与构建
 - 固件输出识别、模板检索和分级验证
 
@@ -94,6 +95,25 @@ Avoid unnecessary edits to `.project`, `.cproject`, `.ccsproject`, `.settings/`,
 - For multi-module projects, find the existing peripheral wrapper, board file, or application module that owns similar behavior before adding new code.
 - For timing/control features, confirm whether the period is controlled by timer ISR, RTOS task delay, hardware PWM/ADC trigger chain, or main-loop polling.
 
+## CCS CLI Tool Discovery
+
+Do not assume `gmake`, `DSLite`, or `sysconfig_cli.bat` is on `PATH`. Run
+`check_syscfg.py` first and use the exact paths it reports from the active
+project's generated build rules. A typical Windows CCS layout is:
+
+| Tool | Generic location |
+| --- | --- |
+| GNU Make | `<ccs-install>\ccs\utils\bin\gmake.exe` |
+| SysConfig CLI | `<ccs-install>\ccs\utils\sysconfig_<version>\sysconfig_cli.bat` |
+| CCS scripting launcher | `<ccs-install>\ccs\scripting\run.bat` |
+| DSLite fallback | `<ccs-install>\ccs\ccs_base\DebugServer\bin\DSLite.exe` |
+
+These are layout patterns, not fixed machine paths. Prefer an exact path derived
+from `Debug/Release/subdir_rules.mk`, then an explicit environment setting, then
+`PATH`. Do not emit or execute a command for a tool that was not actually found.
+If several same-priority installations are plausible, require an explicit
+selection.
+
 ## Validation Chain
 
 Run the static checker first:
@@ -102,15 +122,33 @@ Run the static checker first:
 python scripts\check_syscfg.py <project-dir>
 ```
 
-For SysConfig changes, use this priority:
+For an existing CCS project with both `Debug/makefile` and
+`Debug/subdir_rules.mk`, prefer the reported absolute `gmake` command:
 
-1. When the current session actually exposes a confirmed `ccs-sysconfig` tool, read its matching installation guidance and use it for the active CCS project.
-2. Otherwise use the bundled standalone CLI wrapper for deterministic generation validation.
-3. Use static inspection only when neither backend is available; report that validation stopped before generation.
+```powershell
+"<ccs-install>\ccs\utils\bin\gmake.exe" -C <project-dir>\Debug clean all
+```
 
-Do not probe for or launch an MCP server from workspace files. An exposed MCP can provide immediate mutation diagnostics, while the standalone CLI wrapper validates a completed `.syscfg` edit without reproducing interactive editing feedback. Neither path authorizes a device action or a tool-version change.
+The clean build invokes the SysConfig command recorded in the generated makefile
+before compilation and linking. When the log shows that generation step and the
+build succeeds, report both `sysconfig_generation` and `compile_link` from that
+single operation; do not require a duplicate standalone generation first.
 
-Run safe standalone validation with:
+Use the standalone wrapper when:
+
+- a new project has no generated makefile yet;
+- `.syscfg` needs isolated validation in a temporary directory without a full build;
+- the active Keil/CMake workflow does not demonstrate its own SysConfig generation;
+- build failure needs generation separated from compiler/linker diagnosis.
+
+When the current session exposes a confirmed `ccs-sysconfig` tool, it may be
+used for the active CCS project instead. Do not probe for or launch an MCP
+server from workspace files. An exposed MCP can provide immediate mutation
+diagnostics, while the standalone CLI wrapper validates a completed `.syscfg`
+edit without reproducing interactive editing feedback. Neither path authorizes
+a device action or a tool-version change.
+
+Otherwise run safe standalone validation with:
 
 ```powershell
 python scripts\run_sysconfig.py <project-dir>
@@ -140,11 +178,7 @@ An explicit tool or product may differ from the project declaration. The wrapper
 
 `--keep-output` keeps only the wrapper-created temporary directory for inspection. It still does not write into the project. Regenerate the real project outputs through the active build system after validation.
 
-When the current session actually exposes a confirmed `ccs-project` tool, use its `buildProject` operation so the active workspace configuration and dependencies remain authoritative. Otherwise build through the active project's generated build flow when present:
-
-```powershell
-gmake -C <project-dir>\Debug clean all
-```
+When the current session actually exposes a confirmed `ccs-project` tool, use its `buildProject` operation so the active workspace configuration and dependencies remain authoritative. Otherwise use the exact `gmake` path reported by `check_syscfg.py`; do not fall back to a bare command when it is absent from `PATH`.
 
 If `Debug/makefile` references both `../device_linker.cmd` and `-l"./device_linker.cmd"`, treat that as a CCS generated build-file state issue, not an application or SysConfig failure. Regenerate/rebuild in CCS when possible. For one-off CLI validation, avoid linking the same generated linker script twice.
 
