@@ -12,7 +12,8 @@ Use this file when changing, validating, packaging, or installing this skill. It
 | Project inspection/build lifecycle | `references/workflows/project-lifecycle.md` |
 | New-project creation | `references/workflows/scaffolding.md` |
 | DriverLib/SysConfig runtime rules | `references/runtime/driverlib-runtime.md` |
-| Board-independent TimerG QEI method | `references/runtime/qei.md` |
+| Concise SysConfig pattern views | `references/runtime/sysconfig-patterns.md` |
+| Board-independent peripheral methods | `references/peripherals/*.md` |
 | Probe/debug recovery | `references/debugging/backends.md` |
 | Board facts | `references/hardware/<board>.md` |
 | Peripheral detail | `references/hardware/<board>-peripherals/*.md` |
@@ -20,7 +21,7 @@ Use this file when changing, validating, packaging, or installing this skill. It
 | Executable behavior | one public script in `scripts/` |
 | Copyable code/config | `assets/templates/<board>/<template>/` |
 
-Do not add a second exhaustive routing table, duplicate public board scripts, generated build output, or prose snippets under `assets/`.
+Do not add a second exhaustive routing table, duplicate public board scripts, generated build output, or prose snippets under `assets/`. Keep `references/runtime/sysconfig-patterns.md` as the only concise pattern view; complete copyable configuration remains owned by `assets/templates/`.
 
 ## Change workflow
 
@@ -29,15 +30,16 @@ Do not add a second exhaustive routing table, duplicate public board scripts, ge
 3. Parameterize scripts; never embed a maintainer machine path.
 4. Preserve board distinctions, validation levels, and upstream license notices.
 5. Give every template a UTF-8 `manifest.json` with board, device, package, source list, and validation status.
-6. Run local validation:
+6. When a canonical template changes a represented field, review the concise SysConfig pattern view in the same change.
+7. Run local validation:
 
    ```powershell
    python -B scripts/validate_skill.py .
    python -B <skill-creator-root>\scripts\quick_validate.py .
    ```
 
-7. Stop after repository validation when the skill is not being installed or released.
-8. Only when preparing an installation or release, synchronize a validated tree, run both validators against that artifact, and compare file hashes.
+8. Stop after repository validation when the skill is not being installed or released.
+9. Only when preparing an installation or release, synchronize a validated tree, run both validators against that artifact, and compare file hashes.
 
 ## Validation levels
 
