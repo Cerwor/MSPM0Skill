@@ -1,6 +1,6 @@
 ---
 name: mspm0-development
-description: Develop, inspect, modify, validate, scaffold, build, flash, and debug TI MSPM0 DriverLib/SysConfig firmware, with LCKFB Tianmengxing MSPM0G3507 as the primary board and common-peripheral support for Tianqiaoxing MSPM0G3519, while preserving CCS, Keil, and CMake/GCC/OpenOCD project workflows. Use for MSPM0 C/C++ firmware, .syscfg edits, GPIO/UART/ADC/Timer/PWM/QEI work, generated-name checks, probe selection, serial tests, reusable template capture, and NUEDC/e-contest bring-up. Tianqiaoxing board-application modules without user-provided current material, other TI MCU families, arbitrary custom-board pinouts without schematics, full RTOS architecture migration, production electrical certification, and automatic unlock/mass-erase recovery are outside mature support.
+description: Develop, inspect, modify, validate, scaffold, build, flash, and debug TI MSPM0 DriverLib/SysConfig firmware, with LCKFB Tianmengxing MSPM0G3507 as the primary board and common-peripheral support for Tianqiaoxing MSPM0G3519, while preserving CCS, Keil, and CMake/GCC/OpenOCD project workflows. Use for MSPM0 C/C++ firmware, .syscfg edits, GPIO/UART/SPI/I2C/ADC/Timer/PWM/QEI work, generated-name checks, probe selection, serial tests, reusable template capture, and NUEDC/e-contest bring-up. Tianqiaoxing board-application modules without user-provided current material, other TI MCU families, arbitrary custom-board pinouts without schematics, full RTOS architecture migration, production electrical certification, and automatic unlock/mass-erase recovery are outside mature support.
 ---
 
 # MSPM0 Unified Development
@@ -24,19 +24,20 @@ Read only one Tier-1 reference first. Load Tier-2 only when the task needs that 
 | User task | Tier-1 first read | Tier-2 conditional read | Expected result |
 | --- | --- | --- | --- |
 | Inspect or modify an existing CCS, Keil, or CMake project; edit `.syscfg`; build | [project-lifecycle.md](references/workflows/project-lifecycle.md) | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) for runtime code | Minimal source/config change with an evidence-based validation chain |
-| Add GPIO, UART, SPI, I2C, ADC, Timer, PWM, DMA, interrupt, clock, or external module | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) | Matching board guide and peripheral reference below | SysConfig/DriverLib implementation using local generated names |
-| Add a quadrature encoder or configure TimerG QEI | [qei.md](references/runtime/qei.md) | Matching board guide, current schematic, and installed SDK `timg_qei_mode` example | Pin-safe QEI design with explicit count scaling and wrap handling |
+| Add GPIO, UART, SPI, ADC, Timer, PWM, DMA, interrupt, clock, or external module | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) | Matching board/peripheral guide; use [sysconfig-patterns.md](references/runtime/sysconfig-patterns.md) only when its Contents lists a matching pattern | SysConfig/DriverLib implementation using local generated names |
+| Add an I2C controller/target or diagnose an I2C bus | [i2c.md](references/peripherals/i2c.md) | Matching board I2C guide, current schematic, and target-device datasheet | Electrically safe transaction flow with bounded waits and observable validation |
+| Add a quadrature encoder or configure TimerG QEI | [qei.md](references/peripherals/qei.md) | Matching board guide, current schematic, and installed SDK `timg_qei_mode` example | Pin-safe QEI design with explicit count scaling and wrap handling |
 | Create a new project or select a reusable start | [scaffolding.md](references/workflows/scaffolding.md) | Matching board guide; then one selected asset | A dry-run-reviewed, non-overwriting project scaffold |
 | Detect a probe, flash, inspect registers, set breakpoints, or diagnose a debug backend | [backends.md](references/debugging/backends.md) | [hardware-validation.md](references/troubleshooting/hardware-validation.md) after failure | Explicit backend selection and bounded device action |
 | Use Tianmengxing MSPM0G3507 pins or onboard devices | [tianmengxing.md](references/hardware/tianmengxing.md) | One file under `references/hardware/tianmengxing-peripherals/` | Board-correct pins, polarity, clock, and template choice |
-| Use Tianqiaoxing MSPM0G3519 GPIO, ADC, PWM, Timer, QEI, UART, SPI, or I2C | [tianqiaoxing.md](references/hardware/tianqiaoxing.md) | One matching common-peripheral file or generic QEI reference | Minimal board adaptation without bundled board-application assumptions |
+| Use Tianqiaoxing MSPM0G3519 GPIO, ADC, PWM, Timer, QEI, UART, SPI, or I2C | [tianqiaoxing.md](references/hardware/tianqiaoxing.md) | One matching board file and, when routed, one generic peripheral reference | Minimal board adaptation without bundled board-application assumptions |
 | Maintain, extend, validate, or install this skill | [maintenance.md](references/maintenance/maintenance.md) | [sources-and-boundaries.md](references/maintenance/sources-and-boundaries.md) | Ownership-preserving update with package validation |
 
 Do not create another exhaustive task-routing table in a reference.
 
 ## Template Selection
 
-Use `python -B scripts/list_examples.py` to inspect metadata before opening template files.
+Use `python -B scripts/list_examples.py` to inspect metadata before opening template files. Add `--board`, `--peripheral`, or `--tag` when narrowing the list.
 
 | Need | Starting asset | Required reference |
 | --- | --- | --- |

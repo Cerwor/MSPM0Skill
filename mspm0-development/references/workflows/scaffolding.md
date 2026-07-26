@@ -10,7 +10,10 @@ Use this reference only when creating a new MSPM0 project from a packaged templa
 
    ```powershell
    python -B scripts/list_examples.py
+   python -B scripts/list_examples.py --board Tianmengxing --peripheral UART
    ```
+
+   Read `validation_level` and `physical_behavior_revalidated` independently; `validated=true` does not by itself claim current physical-board behavior.
 
 2. Inspect the scaffold command and run a dry run:
 

@@ -5,7 +5,7 @@
   "description": "Periodic TIMG12 interrupt reference for toggling the LCKFB Tianmengxing MSPM0G3507 onboard PB22 LED every 500 ms.",
   "board": "LCKFB Tianmengxing MSPM0G3507",
   "device": "MSPM0G3507",
-  "package": "LQFP-64",
+  "package": "LQFP-64(PM)",
   "sdk": "MSPM0 SDK 2.10.00.04",
   "sysconfig": "1.27.0",
   "validated": true,

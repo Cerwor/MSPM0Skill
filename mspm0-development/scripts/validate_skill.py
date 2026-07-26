@@ -59,10 +59,12 @@ TIANQIAOXING_COMMON_REFERENCES = {
     "gpio.md",
     "i2c.md",
     "pwm.md",
+    "qei.md",
     "spi.md",
     "timer.md",
     "uart.md",
 }
+TIANMENGXING_COMMON_REFERENCES = TIANQIAOXING_COMMON_REFERENCES.copy()
 TIANQIAOXING_TEMPLATES = {"blink"}
 
 
@@ -240,8 +242,28 @@ def check_tianqiaoxing_scope(root: Path, findings: list[Finding]) -> None:
         )
 
 
+def check_tianmengxing_scope(root: Path, findings: list[Finding]) -> None:
+    reference_dir = root / "references" / "hardware" / "tianmengxing-peripherals"
+    if not reference_dir.is_dir():
+        findings.append(Finding("error", relative(reference_dir, root), "缺少天猛星通用外设参考目录"))
+        return
+    actual_references = {
+        path.name for path in reference_dir.iterdir() if path.is_file() and path.suffix == ".md"
+    }
+    missing_references = TIANMENGXING_COMMON_REFERENCES - actual_references
+    if missing_references:
+        findings.append(
+            Finding(
+                "error",
+                relative(reference_dir, root),
+                "天猛星主维护板缺少通用外设参考；"
+                f"缺少={sorted(missing_references)}",
+            )
+        )
+
+
 def check_qei_reference(root: Path, findings: list[Finding]) -> None:
-    path = root / "references" / "runtime" / "qei.md"
+    path = root / "references" / "peripherals" / "qei.md"
     if not path.is_file():
         findings.append(Finding("error", relative(path, root), "缺少通用 TimerG QEI 参考"))
         return
@@ -290,6 +312,71 @@ def check_qei_reference(root: Path, findings: list[Finding]) -> None:
                 "通用 QEI 参考泄漏旧板卡应用或固定引脚：" + ", ".join(leaked),
             )
         )
+
+    board_requirements = {
+        root
+        / "references"
+        / "hardware"
+        / "tianmengxing-peripherals"
+        / "qei.md": (
+            "../../peripherals/qei.md",
+            "MSPM0G3507",
+            "TIMG8",
+            "PA29",
+            "PA30",
+            "PB22",
+            "PB26",
+            "没有天猛星 QEI 规范模板",
+        ),
+        root
+        / "references"
+        / "hardware"
+        / "tianqiaoxing-peripherals"
+        / "qei.md": (
+            "../../peripherals/qei.md",
+            "MSPM0G3519",
+            "LQFP-64(PM)",
+            "不保留旧编码器应用",
+            "没有天巧星 QEI 规范模板",
+        ),
+    }
+    for board_path, expected_values in board_requirements.items():
+        if not board_path.is_file():
+            findings.append(Finding("error", relative(board_path, root), "缺少板级 QEI 参考"))
+            continue
+        board_text = read_utf8(board_path, findings, root)
+        if board_text is None:
+            continue
+        board_missing = [value for value in expected_values if value not in board_text]
+        if board_missing:
+            findings.append(
+                Finding(
+                    "error",
+                    relative(board_path, root),
+                    "板级 QEI 参考缺少通用路由或板卡边界：" + ", ".join(board_missing),
+                )
+            )
+
+    board_indexes = {
+        root / "references" / "hardware" / "tianmengxing.md": (
+            "tianmengxing-peripherals/qei.md",
+        ),
+        root / "references" / "hardware" / "tianqiaoxing.md": (
+            "tianqiaoxing-peripherals/qei.md",
+        ),
+    }
+    for board_path, expected_values in board_indexes.items():
+        if not board_path.is_file():
+            findings.append(Finding("error", relative(board_path, root), "缺少板级外设索引"))
+            continue
+        board_text = read_utf8(board_path, findings, root)
+        if board_text is None:
+            continue
+        if any(value not in board_text for value in expected_values):
+            findings.append(
+                Finding("error", relative(board_path, root), "板级外设索引未路由到 QEI 参考")
+            )
+
     skill_text = read_utf8(root / "SKILL.md", findings, root)
     if skill_text is not None:
         routing = re.search(
@@ -303,10 +390,449 @@ def check_qei_reference(root: Path, findings: list[Finding]) -> None:
                 target.strip().split("#", 1)[0]
                 for target in MARKDOWN_LINK_RE.findall(routing.group("body"))
             }
-            if "references/runtime/qei.md" not in routing_targets:
+            if "references/peripherals/qei.md" not in routing_targets:
                 findings.append(
                     Finding("error", "SKILL.md", "Quick Routing 未路由到通用 QEI 参考")
                 )
+
+
+def check_i2c_reference(root: Path, findings: list[Finding]) -> None:
+    path = root / "references" / "peripherals" / "i2c.md"
+    if not path.is_file():
+        findings.append(Finding("error", relative(path, root), "缺少通用 MSPM0 I2C 参考"))
+        return
+    text = read_utf8(path, findings, root)
+    if text is None:
+        return
+    required = (
+        "/ti/driverlib/I2C",
+        "7 位地址",
+        "开漏",
+        "上拉",
+        "重复起始",
+        "超时",
+        "NACK",
+        "仲裁丢失",
+        "9 个 SCL",
+        "ti_msp_dl_config.h/.c",
+        "逻辑分析仪",
+    )
+    missing = [value for value in required if value not in text]
+    if missing:
+        findings.append(
+            Finding(
+                "error",
+                relative(path, root),
+                "通用 I2C 参考缺少必要的电气、事务或验证概念：" + ", ".join(missing),
+            )
+        )
+
+    board_requirements = {
+        root
+        / "references"
+        / "hardware"
+        / "tianmengxing-peripherals"
+        / "i2c.md": (
+            "../../peripherals/i2c.md",
+            "PA0",
+            "PA1",
+            "PA0(SDA)/PA1(SCL)",
+            "软件 I2C",
+            "不证明硬件复用方向或板载上拉",
+            "没有天猛星 I2C 规范模板",
+            "ti.com/lit/ds/symlink/mspm0g3507.pdf",
+            "wiki.lckfb.com/zh-hans/tmx-mspm0g3507/ccs-beginner/i2c.html",
+            "wiki.lckfb.com/zh-hans/tmx-mspm0g3507/keil-beginner/i2c.html",
+        ),
+        root
+        / "references"
+        / "hardware"
+        / "tianqiaoxing-peripherals"
+        / "i2c.md": (
+            "../../peripherals/i2c.md",
+            "MSPM0G3519",
+            "LQFP-64(PM)",
+            "不从旧应用恢复",
+            "没有天巧星 I2C 规范模板",
+        ),
+    }
+    for board_path, expected_values in board_requirements.items():
+        if not board_path.is_file():
+            findings.append(Finding("error", relative(board_path, root), "缺少板级 I2C 参考"))
+            continue
+        board_text = read_utf8(board_path, findings, root)
+        if board_text is None:
+            continue
+        board_missing = [value for value in expected_values if value not in board_text]
+        if board_missing:
+            findings.append(
+                Finding(
+                    "error",
+                    relative(board_path, root),
+                    "板级 I2C 参考缺少通用路由或板卡边界：" + ", ".join(board_missing),
+                )
+            )
+        if (
+            "tianmengxing-peripherals" in board_path.parts
+            and re.search(r"(?i)2(?:\.2|k2)\s*k?(?:Ω|ohm|欧)?", board_text)
+        ):
+            findings.append(
+                Finding(
+                    "error",
+                    relative(board_path, root),
+                    "没有当前原理图证据时不得声称天猛星 PA0/PA1 带 2.2 kΩ 板载上拉",
+                )
+            )
+
+    board_indexes = {
+        root / "references" / "hardware" / "tianmengxing.md": (
+            "tianmengxing-peripherals/i2c.md",
+        ),
+        root / "references" / "hardware" / "tianqiaoxing.md": (
+            "tianqiaoxing-peripherals/i2c.md",
+        ),
+    }
+    for board_path, expected_values in board_indexes.items():
+        if not board_path.is_file():
+            findings.append(Finding("error", relative(board_path, root), "缺少板级外设索引"))
+            continue
+        board_text = read_utf8(board_path, findings, root)
+        if board_text is None:
+            continue
+        if (
+            board_path.name == "tianmengxing.md"
+            and re.search(r"(?i)2(?:\.2|k2)\s*k?(?:Ω|ohm|欧)?", board_text)
+        ):
+            findings.append(
+                Finding(
+                    "error",
+                    relative(board_path, root),
+                    "天猛星板级索引不得恢复未经原理图证明的 2.2 kΩ I2C 上拉",
+                )
+            )
+        if any(value not in board_text for value in expected_values):
+            findings.append(
+                Finding("error", relative(board_path, root), "板级外设索引未路由到 I2C 参考")
+            )
+
+    skill_text = read_utf8(root / "SKILL.md", findings, root)
+    if skill_text is None:
+        return
+    routing = re.search(
+        r"(?ms)^## Quick Routing\s*$\n(?P<body>.*?)(?=^## |\Z)",
+        skill_text,
+    )
+    if routing is None:
+        findings.append(Finding("error", "SKILL.md", "无法解析 Quick Routing 段"))
+        return
+    routing_targets = {
+        target.strip().split("#", 1)[0]
+        for target in MARKDOWN_LINK_RE.findall(routing.group("body"))
+    }
+    if "references/peripherals/i2c.md" not in routing_targets:
+        findings.append(Finding("error", "SKILL.md", "Quick Routing 未路由到通用 I2C 参考"))
+
+
+def check_sysconfig_patterns(root: Path, findings: list[Finding]) -> None:
+    path = root / "references" / "runtime" / "sysconfig-patterns.md"
+    if not path.is_file():
+        findings.append(Finding("error", relative(path, root), "缺少 SysConfig 局部模式参考"))
+        return
+    text = read_utf8(path, findings, root)
+    if text is None:
+        return
+    required = (
+        "associatedPins.create(1)",
+        "assignedPort",
+        "pin.$assign",
+        "PB22",
+        'system.clockTree["MFCLKGATE"]',
+        'system.clockTree["SYSPLLMUX"]',
+        "UART0",
+        "PA10",
+        "PA11",
+        "DMA_CHANNEL_TX",
+        "DMA_CH0",
+        "timerPeriod",
+        '"1 ms"',
+        "TIMG12",
+        "empty_project/empty.syscfg",
+        "uart_blocking_tx/example.syscfg",
+        "uart_dma_tx_irq_rx/example.syscfg",
+        "timer_irq_led/example.syscfg",
+    )
+    missing = [value for value in required if value not in text]
+    if missing:
+        findings.append(
+            Finding(
+                "error",
+                relative(path, root),
+                "SysConfig 局部模式缺少必要配置或规范模板链接：" + ", ".join(missing),
+            )
+        )
+    if re.search(r"(?m)^\s*GPIO\d+\.port\s*=", text):
+        findings.append(Finding("error", relative(path, root), "局部模式仍包含 GPIO 顶层 port 旧语法"))
+    if re.search(
+        r"GPIO\d+\.associatedPins\[\d+\]\.pin\.\$suggestSolution\s*=",
+        text,
+    ):
+        findings.append(Finding("error", relative(path, root), "局部模式 GPIO 应使用显式 pin.$assign"))
+
+    section_names = (
+        "PB22 GPIO 输出",
+        "80 MHz 与 MFCLK",
+        "UART0 阻塞收发基础",
+        "UART DMA TX 与 IRQ RX",
+        "Timer 周期中断",
+        "空配置骨架",
+    )
+    sections: dict[str, str] = {}
+    for section_name in section_names:
+        section = re.search(
+            rf"(?ms)^## {re.escape(section_name)}\s*$\n(?P<body>.*?)(?=^## |\Z)",
+            text,
+        )
+        if section is None:
+            findings.append(
+                Finding("error", relative(path, root), f"缺少局部模式章节：{section_name}")
+            )
+            continue
+        sections[section_name] = section.group("body")
+
+    template_paths = {
+        "gpio": root / "assets" / "templates" / "tianmengxing" / "led_blink" / "example.syscfg",
+        "clock_timer": (
+            root
+            / "assets"
+            / "templates"
+            / "tianmengxing"
+            / "timer_irq_led"
+            / "example.syscfg"
+        ),
+        "uart": (
+            root
+            / "assets"
+            / "templates"
+            / "tianmengxing"
+            / "uart_blocking_tx"
+            / "example.syscfg"
+        ),
+        "dma": (
+            root
+            / "assets"
+            / "templates"
+            / "tianmengxing"
+            / "uart_dma_tx_irq_rx"
+            / "example.syscfg"
+        ),
+        "empty": (
+            root
+            / "assets"
+            / "templates"
+            / "tianmengxing"
+            / "empty_project"
+            / "empty.syscfg"
+        ),
+    }
+    templates = {
+        name: read_utf8(template_path, findings, root)
+        for name, template_path in template_paths.items()
+    }
+    clock_alias = r"(?P<alias>[A-Za-z_$][\w$]*)"
+    semantic_checks = (
+        (
+            "GPIO 端口",
+            "PB22 GPIO 输出",
+            "gpio",
+            r'associatedPins\[0\]\.assignedPort\s*=\s*"(?P<value>[^"]+)"',
+            "PORTB",
+        ),
+        (
+            "GPIO 引脚号",
+            "PB22 GPIO 输出",
+            "gpio",
+            r'associatedPins\[0\]\.assignedPin\s*=\s*"(?P<value>[^"]+)"',
+            "22",
+        ),
+        (
+            "GPIO 封装引脚",
+            "PB22 GPIO 输出",
+            "gpio",
+            r'associatedPins\[0\]\.pin\.\$assign\s*=\s*"(?P<value>[^"]+)"',
+            "PB22",
+        ),
+        (
+            "MFCLK gate",
+            "80 MHz 与 MFCLK",
+            "clock_timer",
+            (
+                rf'const\s+{clock_alias}\s*=\s*system\.clockTree\["MFCLKGATE"\]\s*;'
+                rf"\s*(?P=alias)\.enable\s*=\s*(?P<value>true|false)"
+            ),
+            "true",
+        ),
+        (
+            "SYSPLL 输入",
+            "80 MHz 与 MFCLK",
+            "clock_timer",
+            (
+                rf'const\s+{clock_alias}\s*=\s*system\.clockTree\["SYSPLLMUX"\]\s*;'
+                rf'\s*(?P=alias)\.inputSelect\s*=\s*"(?P<value>[^"]+)"'
+            ),
+            "zSYSPLLMUX_HFCLK",
+        ),
+        (
+            "HFXT 频率",
+            "80 MHz 与 MFCLK",
+            "clock_timer",
+            (
+                rf'const\s+{clock_alias}\s*=\s*system\.clockTree\["HFXT"\]\s*;'
+                rf"[\s\S]*?(?P=alias)\.inputFreq\s*=\s*(?P<value>[0-9.]+)"
+            ),
+            "40",
+        ),
+        (
+            "HFXT 输入引脚",
+            "80 MHz 与 MFCLK",
+            "clock_timer",
+            (
+                rf'const\s+{clock_alias}\s*=\s*system\.clockTree\["HFXT"\]\s*;'
+                rf'[\s\S]*?(?P=alias)\.peripheral\.hfxInPin\.\$suggestSolution\s*='
+                rf'\s*"(?P<value>[^"]+)"'
+            ),
+            "PA5",
+        ),
+        (
+            "HFXT 输出引脚",
+            "80 MHz 与 MFCLK",
+            "clock_timer",
+            (
+                rf'const\s+{clock_alias}\s*=\s*system\.clockTree\["HFXT"\]\s*;'
+                rf'[\s\S]*?(?P=alias)\.peripheral\.hfxOutPin\.\$suggestSolution\s*='
+                rf'\s*"(?P<value>[^"]+)"'
+            ),
+            "PA6",
+        ),
+        (
+            "UART 波特率",
+            "UART0 阻塞收发基础",
+            "uart",
+            r"UART\d+\.targetBaudRate\s*=\s*(?P<value>\d+)",
+            "115200",
+        ),
+        (
+            "UART TX 引脚",
+            "UART0 阻塞收发基础",
+            "uart",
+            r'UART\d+\.peripheral\.txPin\.\$assign\s*=\s*"(?P<value>[^"]+)"',
+            "PA10",
+        ),
+        (
+            "UART RX 引脚",
+            "UART0 阻塞收发基础",
+            "uart",
+            r'UART\d+\.peripheral\.rxPin\.\$assign\s*=\s*"(?P<value>[^"]+)"',
+            "PA11",
+        ),
+        (
+            "UART 外设实例",
+            "UART0 阻塞收发基础",
+            "uart",
+            r'UART\d+\.peripheral\.\$suggestSolution\s*=\s*"(?P<value>[^"]+)"',
+            "UART0",
+        ),
+        (
+            "UART TX DMA 通道",
+            "UART DMA TX 与 IRQ RX",
+            "dma",
+            r'DMA_CHANNEL_TX\.peripheral\.\$suggestSolution\s*=\s*"(?P<value>[^"]+)"',
+            "DMA_CH0",
+        ),
+        (
+            "Timer 周期",
+            "Timer 周期中断",
+            "clock_timer",
+            r'TIMER\d+\.timerPeriod\s*=\s*"(?P<value>[^"]+)"',
+            "1 ms",
+        ),
+        (
+            "Timer 实例",
+            "Timer 周期中断",
+            "clock_timer",
+            r'TIMER\d+\.peripheral\.\$assign\s*=\s*"(?P<value>[^"]+)"',
+            "TIMG12",
+        ),
+        (
+            "空骨架 SYSCTL",
+            "空配置骨架",
+            "empty",
+            r'scripting\.addModule\("(?P<value>/ti/driverlib/SYSCTL)"',
+            "/ti/driverlib/SYSCTL",
+        ),
+        (
+            "空骨架默认时钟",
+            "空配置骨架",
+            "empty",
+            r"SYSCTL\.forceDefaultClkConfig\s*=\s*(?P<value>true|false)",
+            "true",
+        ),
+    )
+    for label, section_name, template_name, pattern, expected in semantic_checks:
+        section_text = sections.get(section_name)
+        template_text = templates.get(template_name)
+        if section_text is None or template_text is None:
+            continue
+        reference_match = re.search(pattern, section_text)
+        template_match = re.search(pattern, template_text)
+        reference_value = reference_match.group("value") if reference_match else None
+        template_value = template_match.group("value") if template_match else None
+        if reference_value is None:
+            findings.append(
+                Finding("error", relative(path, root), f"{label} 无法从局部模式中解析")
+            )
+            continue
+        if template_value is None:
+            findings.append(
+                Finding(
+                    "error",
+                    relative(template_paths[template_name], root),
+                    f"{label} 无法从规范模板中解析",
+                )
+            )
+            continue
+        if reference_value != template_value:
+            findings.append(
+                Finding(
+                    "error",
+                    relative(path, root),
+                    f"{label} 与规范模板不一致：局部模式={reference_value}，模板={template_value}",
+                )
+            )
+        if reference_value != expected or template_value != expected:
+            findings.append(
+                Finding(
+                    "error",
+                    relative(path, root),
+                    f"{label} 偏离天猛星基准值：期望={expected}",
+                )
+            )
+
+    skill_text = read_utf8(root / "SKILL.md", findings, root)
+    if skill_text is None:
+        return
+    routing = re.search(
+        r"(?ms)^## Quick Routing\s*$\n(?P<body>.*?)(?=^## |\Z)",
+        skill_text,
+    )
+    if routing is None:
+        findings.append(Finding("error", "SKILL.md", "无法解析 Quick Routing 段"))
+        return
+    routing_targets = {
+        target.strip().split("#", 1)[0]
+        for target in MARKDOWN_LINK_RE.findall(routing.group("body"))
+    }
+    if "references/runtime/sysconfig-patterns.md" not in routing_targets:
+        findings.append(Finding("error", "SKILL.md", "Quick Routing 未路由到 SysConfig 局部模式参考"))
 
 
 def manifest_files(manifest: dict[str, object]) -> list[str]:
@@ -362,9 +888,50 @@ def check_templates(root: Path, findings: list[Finding]) -> None:
             except (UnicodeError, json.JSONDecodeError) as exc:
                 findings.append(Finding("error", relative(manifest_path, root), f"manifest 无效：{exc}"))
                 continue
-            for key in ("schema", "name", "title", "description", "board", "device", "validated", "validation_level"):
+            if not isinstance(manifest, dict):
+                findings.append(
+                    Finding("error", relative(manifest_path, root), "manifest 根节点必须是 JSON 对象")
+                )
+                continue
+            required_keys = (
+                "schema",
+                "name",
+                "title",
+                "description",
+                "board",
+                "device",
+                "package",
+                "validated",
+                "validation_level",
+                "physical_behavior_revalidated",
+                "source_files",
+                "syscfg",
+            )
+            for key in required_keys:
                 if key not in manifest:
                     findings.append(Finding("error", relative(manifest_path, root), f"缺少字段 {key}"))
+            if manifest.get("schema") != 1:
+                findings.append(
+                    Finding("error", relative(manifest_path, root), "manifest schema 必须为 1")
+                )
+            for key in ("name", "title", "description", "board", "device", "package", "validation_level", "syscfg"):
+                if not isinstance(manifest.get(key), str) or not str(manifest.get(key)).strip():
+                    findings.append(
+                        Finding("error", relative(manifest_path, root), f"字段 {key} 必须是非空字符串")
+                    )
+            if not isinstance(manifest.get("validated"), bool):
+                findings.append(
+                    Finding("error", relative(manifest_path, root), "字段 validated 必须是布尔值")
+                )
+            source_files = manifest.get("source_files")
+            if (
+                not isinstance(source_files, list)
+                or not source_files
+                or not all(isinstance(item, str) and item.strip() for item in source_files)
+            ):
+                findings.append(
+                    Finding("error", relative(manifest_path, root), "字段 source_files 必须是非空字符串列表")
+                )
             if manifest.get("name") != template.name:
                 findings.append(
                     Finding(
@@ -396,10 +963,47 @@ def check_templates(root: Path, findings: list[Finding]) -> None:
             syscfgs = list(template.glob("*.syscfg"))
             if len(syscfgs) != 1:
                 findings.append(Finding("error", rel, f"模板应有一个根级 .syscfg，实际 {len(syscfgs)} 个"))
+            elif manifest.get("syscfg") != syscfgs[0].name:
+                findings.append(
+                    Finding(
+                        "error",
+                        relative(manifest_path, root),
+                        f"manifest syscfg 必须指向 {syscfgs[0].name}",
+                    )
+                )
             for syscfg in syscfgs:
                 syscfg_text = read_utf8(syscfg, findings, root)
                 if syscfg_text is None:
                     continue
+                metadata_packages = set(re.findall(r'--package\s+"([^"]+)"', syscfg_text))
+                expected_package = {str(manifest.get("package"))}
+                if metadata_packages != expected_package:
+                    findings.append(
+                        Finding(
+                            "error",
+                            relative(manifest_path, root),
+                            "manifest package 与 .syscfg metadata 不一致："
+                            f"manifest={manifest.get('package')}，"
+                            f"metadata={sorted(metadata_packages)}",
+                        )
+                    )
+                metadata_devices = set(
+                    re.findall(
+                        r'(?m)@v2CliArgs[^\r\n]*--device\s+"([^"]+)"',
+                        syscfg_text,
+                    )
+                )
+                expected_device = {str(manifest.get("device"))}
+                if metadata_devices != expected_device:
+                    findings.append(
+                        Finding(
+                            "error",
+                            relative(manifest_path, root),
+                            "manifest device 与 .syscfg v2 metadata 不一致："
+                            f"manifest={manifest.get('device')}，"
+                            f"metadata={sorted(metadata_devices)}",
+                        )
+                    )
                 if re.search(r"(?m)^\s*GPIO\d+\.port\s*=", syscfg_text):
                     findings.append(
                         Finding(
@@ -676,8 +1280,11 @@ def validate(root: Path) -> list[Finding]:
     check_markdown(root, findings)
     check_absolute_paths(root, findings)
     check_openai_yaml(root, skill_name, findings)
+    check_tianmengxing_scope(root, findings)
     check_tianqiaoxing_scope(root, findings)
     check_qei_reference(root, findings)
+    check_i2c_reference(root, findings)
+    check_sysconfig_patterns(root, findings)
     check_templates(root, findings)
     check_script_help(root, findings)
     check_scaffold_adaptation(root, findings)

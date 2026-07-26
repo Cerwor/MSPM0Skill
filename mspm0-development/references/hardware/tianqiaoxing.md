@@ -37,7 +37,7 @@
 - [ADC](tianqiaoxing-peripherals/adc.md)
 - [PWM](tianqiaoxing-peripherals/pwm.md)
 - [Timer](tianqiaoxing-peripherals/timer.md)
-- [QEI](../runtime/qei.md)
+- [QEI](tianqiaoxing-peripherals/qei.md)
 - [UART](tianqiaoxing-peripherals/uart.md)
 - [SPI](tianqiaoxing-peripherals/spi.md)
 - [I2C](tianqiaoxing-peripherals/i2c.md)
@@ -47,5 +47,4 @@
 - 修改现有工程：先读 [project-lifecycle.md](../workflows/project-lifecycle.md)。
 - 新建最小工程：先读 [scaffolding.md](../workflows/scaffolding.md)。
 - 探针、烧录和调试：读 [backends.md](../debugging/backends.md)，并按实际 J-Link、XDS110 或其他已识别探针显式选择。
-- QEI 只复用板卡无关的 TimerG 方法；不保留旧编码器应用的固定引脚、按键、显示、轮询周期、驱动文件或模板。
 - 如果任务超出上述通用外设范围，先读取用户提供的当前资料，不从已删除的旧应用知识重建接线或驱动。

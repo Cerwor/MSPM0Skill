@@ -33,6 +33,7 @@
 | 引脚 | 约束 |
 |---|---|
 | PA18 | BSL 入口，上电复位状态需满足板卡要求 |
+| PA0、PA1 | 硬件 I2C0 候选为 PA0/SDA、PA1/SCL；嘉立创软件 I2C 教程的 GPIO 角色不一致，且不能据此声称板载上拉 |
 | PA21 | VREF-，串联电容到地，仅考虑低速 GPIO |
 | PA23 | VREF+，串联电容到地，仅考虑低速 GPIO |
 | PA10、PA11 | 板载 CH340 UART0，可从排针共用；改作其他功能会失去或干扰默认串口 |
@@ -58,9 +59,7 @@
 
 ## 外设索引
 
-按任务只读取一个入口：[GPIO](tianmengxing-peripherals/gpio.md)、[UART](tianmengxing-peripherals/uart.md)、[SPI](tianmengxing-peripherals/spi.md)、[ADC](tianmengxing-peripherals/adc.md)、[Timer](tianmengxing-peripherals/timer.md)、[PWM](tianmengxing-peripherals/pwm.md) 或通用 [QEI](../runtime/qei.md)。
-
-匹配 SDK 的 `LP_MSPM0G3507/driverlib/timg_qei_mode` 可用于确认器件的 QEI schema 与 DriverLib 用法。其中常见的 TIMG8、PA29/PA30 组合只能作为器件/封装复用候选，不能替代天猛星当前原理图、排针可达性和工程占用检查。TIMG8 被 QEI 占用后不能再供 PB22 LED PWM、PB26 背光 PWM 或其他 Timer/PWM 实例使用；从现有 PWM 模板迁移时先解除这一资源冲突。
+按任务只读取一个入口：[GPIO](tianmengxing-peripherals/gpio.md)、[UART](tianmengxing-peripherals/uart.md)、[SPI](tianmengxing-peripherals/spi.md)、[I2C](tianmengxing-peripherals/i2c.md)、[ADC](tianmengxing-peripherals/adc.md)、[Timer](tianmengxing-peripherals/timer.md)、[PWM](tianmengxing-peripherals/pwm.md) 或 [QEI](tianmengxing-peripherals/qei.md)。
 
 ## 烧录注意事项
 

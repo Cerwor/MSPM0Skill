@@ -19,7 +19,7 @@ Bundled source license texts are retained under `references/maintenance/licenses
 | Source | Retained capability | Deliberate treatment |
 | --- | --- | --- |
 | `mspm0-skill-main/skills/mspm0-ccs` | All nine core scripts; project discovery; SysConfig generation; probe detection; serial, CCS DSS, and OpenOCD workflows; six compact G3507 templates | Five scripts remain byte-equivalent. Template listing/capture, workspace recognition, and bounded Windows probe discovery are maintained changes; the unified scaffolder is a maintained addition. |
-| Standalone `mspm0-ccs` snapshot | Same core rules, snippets, examples, and hardware lessons | Screenshots, cache files, README files, and duplicate prose snippets are not runtime skill resources; their reusable content is represented by references and templates. |
+| Standalone `mspm0-ccs` snapshot | Same core rules, snippets, examples, and hardware lessons | Screenshots, cache files, README files, and raw duplicate prose snippets are not copied. Their reusable content is represented by canonical templates and the normalized `references/runtime/sysconfig-patterns.md` view. |
 | `mspm0kit-tianmengxing` | Board pin/clock/occupancy facts and all six peripheral references | Board-local setup/build/flash/cleanup/serial scripts were consolidated into core discovery, project workflow, debug backends, and the unified scaffolder. Maintainer-local path defaults and implicit cleanup/device actions were not retained. |
 | `mspm0kit-tianqiaoxing` | Device/package baseline, common GPIO/ADC/PWM/Timer/QEI/UART/SPI/I2C patterns, and the minimal blink source/config | QEI is retained only as board-independent TimerG configuration, wrap-safe delta, scaling, and validation guidance rechecked against the matching TI SDK. No old QEI application code/config is copied; fixed encoder pins, button/display behavior, polling interval, board driver, and example template remain deliberately absent with the other board applications. |
 | CCS Theia-generated AI workspace metadata | Workspace-container recognition; conditional routing to actually exposed project, SysConfig, or debug tools; one-session/reload safety rules | `.mcp.json`, `.claude/`, `CLAUDE.md`, machine paths, and host allowlists are not copied. TI Arm Clang coverage is specialized and remains outside this distillation. |
@@ -46,11 +46,12 @@ When sources conflict, preserve the conflict explicitly and ask for missing hard
 - Tianqiaoxing board-application pin maps and middleware are intentionally absent. Reload them only from material supplied for the current task and keep that evidence task-local unless the user explicitly requests a new distillation.
 - The historical Tianqiaoxing QEI example is not a trusted template: its packaged dependencies and alternate GPIO path are incomplete, while midpoint reset, fixed `/4`, fixed 5 ms timing, and application callbacks are hardware/application assumptions. Its old hardware-validation label does not transfer to this skill.
 - The old QEI/OLED application subtree does not carry self-contained component attribution and notices in the inspected snapshot. Do not copy code or config from it; any future import requires an explicit upstream license/notice review.
+- The old Tianmengxing peripheral snapshot claims PA0/PA1 board pull-ups without a bundled schematic. Official LCKFB CCS and Keil software-I2C tutorials use PA0/PA1 with opposite SDA/SCL roles, so tutorial wiring is not hardware-mux evidence. For hardware I2C0, treat PA0/SDA and PA1/SCL only as current MSPM0G3507 metadata candidates, and require the current schematic, external-module data, or measurement before claiming pull-ups.
 
 ## Mature support
 
 - Source and `.syscfg` inspection, generated-name checks, bounded SysConfig execution, template enumeration/capture, deterministic scaffolding, probe detection, serial monitoring, CCS DSS setup, and OpenOCD setup.
-- Full maintained Tianmengxing routing plus bounded Tianqiaoxing routing for the common peripherals documented in `references/hardware/`, including board-independent QEI workflow.
+- Full maintained Tianmengxing routing plus bounded Tianqiaoxing routing for board facts in `references/hardware/`, with reusable cross-board methods in `references/peripherals/`.
 
 ## Partial or conditional support
 

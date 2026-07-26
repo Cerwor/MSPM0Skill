@@ -10,6 +10,7 @@
 - 以 `.syscfg` 为配置源管理引脚、时钟、外设、中断和 DMA。
 - 使用本工程生成的 `ti_msp_dl_config.h/.c` 名称编写 DriverLib 代码。
 - 创建或复用最小工程、GPIO、PWM、Timer IRQ 和 UART 模板。
+- 提供 GPIO、80 MHz 时钟、UART、Timer IRQ 和空骨架的简洁 SysConfig 局部模式。
 - 检测 J-Link、XDS110 等探针，使用 CCS/DSLite、CCS DSS 或 OpenOCD 等调试后端，并保持烧录与调试操作的授权边界。
 - 分别报告静态检查、SysConfig 生成、编译、烧录、串口和实物行为证据。
 - 支持 GPIO、UART、SPI、I2C、ADC、Timer、PWM、DMA、QEI 等常见 MSPM0 开发任务。
@@ -18,7 +19,7 @@
 
 | 板卡 | 定位 | 当前支持 |
 | --- | --- | --- |
-| 天猛星 MSPM0G3507 LQFP-64 | 主要维护板卡 | 完整板级入口、常用外设参考和 6 个起始模板 |
+| 天猛星 MSPM0G3507 LQFP-64 | 主要维护板卡 | GPIO、ADC、PWM、Timer、QEI、UART、SPI、I2C 板级入口和 6 个起始模板 |
 | 天巧星 MSPM0G3519 LQFP-64(PM) | 通用外设层 | GPIO、ADC、PWM、Timer、QEI、UART、SPI、I2C 参考及最小 blink 模板 |
 | TI LaunchPad | 适配证据 | 只复用器件、SDK、SysConfig 和工具行为，不套用其板载引脚或探针默认值 |
 
@@ -377,6 +378,7 @@ skill 会优先检查用户的当前工程和匹配的本地 SDK metadata。缺�
 ```powershell
 Set-Location .\mspm0-development
 python -B scripts\list_examples.py
+python -B scripts\list_examples.py --board Tianmengxing --peripheral UART
 ```
 
 当前模板：
@@ -391,11 +393,21 @@ python -B scripts\list_examples.py
 | 天猛星 | `uart_dma_tx_irq_rx` |
 | 天巧星 | `blink` |
 
-模板只是起始证据，不是所有工程都能直接复制的固定布局。引脚、时钟、SDK、编译器和探针仍应以当前项目为准。
+列表会分别显示当前验证层级和是否完成物理行为复验。模板只是起始证据，不是所有工程都能直接复制的固定布局；引脚、时钟、SDK、编译器和探针仍应以当前项目为准。
+
+需要快速查看局部 `.syscfg` 写法时，读取 [SysConfig 局部模式](mspm0-development/references/runtime/sysconfig-patterns.md)，再打开对应完整模板和 `manifest.json`。局部模式不是可独立生成的完整配置。
+
+## I2C 支持
+
+通用 I2C 方法见 [`references/peripherals/i2c.md`](mspm0-development/references/peripherals/i2c.md)，板级差异分别见 [天猛星 I2C](mspm0-development/references/hardware/tianmengxing-peripherals/i2c.md) 和 [天巧星 I2C](mspm0-development/references/hardware/tianqiaoxing-peripherals/i2c.md)。
+
+- 天猛星硬件 I2C0 的候选是 PA0/SDA、PA1/SCL；嘉立创 CCS 与 Keil 软件 I2C 教程对两线角色的示例并不一致，不能据此推断硬件复用或板载上拉。
+- 通用方法覆盖开漏与上拉、7 位地址、重复起始、有限超时、错误分类、条件性总线恢复和逻辑分析仪验证。
+- 当前没有 I2C 规范模板，因此不会把局部配置片段冒充已生成或已完成实物验证的配置。
 
 ## QEI 支持
 
-通用 QEI 参考见 [`references/runtime/qei.md`](mspm0-development/references/runtime/qei.md)。
+通用 QEI 参考见 [`references/peripherals/qei.md`](mspm0-development/references/peripherals/qei.md)，板级候选与冲突分别见 [天猛星 QEI](mspm0-development/references/hardware/tianmengxing-peripherals/qei.md) 和 [天巧星 QEI](mspm0-development/references/hardware/tianqiaoxing-peripherals/qei.md)。
 
 - 使用 `/ti/driverlib/QEI` 和同一 TimerG 实例的 CCP0/CCP1。
 - 从当前 SysConfig 生成结果读取实例、IRQ、引脚和装载值。
