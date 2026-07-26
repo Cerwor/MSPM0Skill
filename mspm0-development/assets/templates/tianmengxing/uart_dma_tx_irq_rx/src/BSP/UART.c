@@ -1,10 +1,24 @@
 #include "UART.h"
 #include <stdlib.h>
+#include <string.h>
 
 #define UART_DMA_CH_NONE 0xFFu
 #define UART_IRQN_NONE   ((IRQn_Type) (-128))
 
 static UART_Context uartContexts[UART_MAX_CONTEXTS];
+
+static UART_Context *UART_findContext(UART_Regs *uart)
+{
+    uint8_t i;
+
+    for (i = 0; i < UART_MAX_CONTEXTS; i++) {
+        if ((uartContexts[i].inst != 0) && (uartContexts[i].inst == uart)) {
+            return &uartContexts[i];
+        }
+    }
+
+    return 0;
+}
 
 static uint16_t UART_clampPrintfLength(int len)
 {
@@ -22,11 +36,11 @@ static uint16_t UART_clampPrintfLength(int len)
 static UART_Context *UART_allocContext(UART_Regs *uart)
 {
     uint8_t i;
+    UART_Context *ctx;
 
-    for (i = 0; i < UART_MAX_CONTEXTS; i++) {
-        if (uartContexts[i].inst == uart) {
-            return &uartContexts[i];
-        }
+    ctx = UART_findContext(uart);
+    if (ctx != 0) {
+        return ctx;
     }
 
     for (i = 0; i < UART_MAX_CONTEXTS; i++) {
@@ -36,7 +50,6 @@ static UART_Context *UART_allocContext(UART_Regs *uart)
             uartContexts[i].onFrame = 0;
             uartContexts[i].txDMADone = 1;
             uartContexts[i].rxBuf[0] = '\0';
-            uartContexts[i].rxWorkBuf[0] = '\0';
             return &uartContexts[i];
         }
     }
@@ -46,7 +59,7 @@ static UART_Context *UART_allocContext(UART_Regs *uart)
 
 UART_Context *UART_getContext(UART_Regs *uart)
 {
-    return UART_allocContext(uart);
+    return UART_findContext(uart);
 }
 
 static IRQn_Type UART_getIRQn(UART_Regs *uart)
@@ -104,6 +117,12 @@ UART_Context *UART_init(UART_Regs *uart, UART_RxMode rxMode, UART_FrameCallback 
     IRQn_Type irqn;
     UART_Context *ctx;
 
+    irqn = UART_getIRQn(uart);
+    if ((irqn == UART_IRQN_NONE) ||
+        ((rxMode != UART_RX_MODE_NONE) && (rxMode != UART_RX_MODE_IRQ_DEFERRED))) {
+        return 0;
+    }
+
     ctx = UART_allocContext(uart);
     if (ctx == 0) {
         return 0;
@@ -114,19 +133,14 @@ UART_Context *UART_init(UART_Regs *uart, UART_RxMode rxMode, UART_FrameCallback 
     if (rxMode != UART_RX_MODE_NONE) {
         UART_startReceive(uart);
     } else {
-        ctx->rxDone = 0;
+        ctx->frameReady = 0;
+        ctx->rxOverflow = 0;
+        ctx->discardUntilLF = 0;
         ctx->rxPos = 0;
         ctx->rxLen = 0;
-        ctx->rxOvf = 0;
         ctx->rxBuf[0] = '\0';
-        ctx->rxWorkBuf[0] = '\0';
     }
     ctx->txDMADone = 1;
-
-    irqn = UART_getIRQn(uart);
-    if (irqn == UART_IRQN_NONE) {
-        return 0;
-    }
 
     NVIC_ClearPendingIRQ(irqn);
     NVIC_EnableIRQ(irqn);
@@ -211,18 +225,29 @@ uint8_t UART_trySendStrDMA(UART_Regs *uart, const char *str, uint16_t len)
         return 0;
     }
 
+    if (len > UART_TX_BUF_SIZE) {
+        len = UART_TX_BUF_SIZE;
+    }
+    if (str != ctx->txBuf) {
+        /*
+         * DMA 返回后仍会读取源地址，因此先复制到上下文持有的长期缓冲区，
+         * 避免调用者传入栈上字符串后产生悬空指针。
+         */
+        memcpy(ctx->txBuf, str, len);
+    }
+
     dmaChannel = UART_getDMATxChannel(uart);
     if (dmaChannel == UART_DMA_CH_NONE) {
         uint16_t i;
 
         for (i = 0; i < len; i++) {
-            DL_UART_transmitDataBlocking(uart, (uint8_t) str[i]);
+            DL_UART_transmitDataBlocking(uart, (uint8_t) ctx->txBuf[i]);
         }
         return 1;
     }
 
     ctx->txDMADone = 0;
-    DL_DMA_setSrcAddr(DMA, dmaChannel, (uint32_t) str);
+    DL_DMA_setSrcAddr(DMA, dmaChannel, (uint32_t) ctx->txBuf);
     DL_DMA_setDestAddr(DMA, dmaChannel, (uint32_t) (&uart->TXDATA));
     DL_DMA_setTransferSize(DMA, dmaChannel, len);
     DL_DMA_enableChannel(DMA, dmaChannel);
@@ -258,9 +283,13 @@ void UART_startReceive(UART_Regs *uart)
     }
 
     ctx->rxPos = 0;
-    ctx->rxDone = 0;
-    ctx->rxOvf = 0;
-    ctx->rxWorkBuf[0] = '\0';
+    ctx->rxLen = 0;
+    ctx->frameReady = 0;
+    ctx->rxOverflow = 0;
+    ctx->discardUntilLF = 0;
+    ctx->rxFrameCount = 0;
+    ctx->rxDroppedFrameCount = 0;
+    ctx->rxBuf[0] = '\0';
 }
 
 uint8_t UART_hasNewFrame(UART_Regs *uart)
@@ -272,7 +301,7 @@ uint8_t UART_hasNewFrame(UART_Regs *uart)
         return 0;
     }
 
-    return ctx->rxDone;
+    return ctx->frameReady;
 }
 
 void UART_clearNewFrame(UART_Regs *uart)
@@ -281,7 +310,15 @@ void UART_clearNewFrame(UART_Regs *uart)
 
     ctx = UART_getContext(uart);
     if (ctx != 0) {
-        ctx->rxDone = 0;
+        ctx->rxOverflow = 0;
+        ctx->rxPos = 0;
+        ctx->rxLen = 0;
+        ctx->rxBuf[0] = '\0';
+        /*
+         * frameReady 最后清零；在此之前 ISR 仍认为缓冲区归前台，
+         * 不会用旧索引覆盖刚重置的状态。
+         */
+        ctx->frameReady = 0;
     }
 }
 
@@ -290,7 +327,7 @@ uint8_t UART_poll(UART_Regs *uart)
     UART_Context *ctx;
 
     ctx = UART_getContext(uart);
-    if ((ctx == 0) || (ctx->rxMode != UART_RX_MODE_POLL) || (!ctx->rxDone)) {
+    if ((ctx == 0) || (ctx->rxMode != UART_RX_MODE_IRQ_DEFERRED) || (!ctx->frameReady)) {
         return 0;
     }
 
@@ -377,45 +414,48 @@ uint8_t UART_RxCallback(UART_Regs *uart)
         return 0;
     }
 
-    if (rxData == UART_RX_TERMINATOR) {
-        uint16_t i;
-
-        ctx->rxWorkBuf[ctx->rxPos] = '\0';
-        for (i = 0; i <= ctx->rxPos; i++) {
-            ctx->rxBuf[i] = ctx->rxWorkBuf[i];
+    if (ctx->discardUntilLF) {
+        if (rxData == UART_RX_TERMINATOR) {
+            ctx->discardUntilLF = 0;
+            ctx->rxDroppedFrameCount++;
         }
+        return 0;
+    }
+
+    if (ctx->frameReady) {
+        if (rxData == UART_RX_TERMINATOR) {
+            ctx->rxDroppedFrameCount++;
+        } else {
+            ctx->discardUntilLF = 1;
+        }
+        return 0;
+    }
+
+    if (rxData == UART_RX_TERMINATOR) {
+        ctx->rxBuf[ctx->rxPos] = '\0';
         ctx->rxLen = ctx->rxPos;
         ctx->rxFrameCount++;
-        ctx->rxDone = 1;
-        ctx->rxPos = 0;
-        ctx->rxWorkBuf[0] = '\0';
+        ctx->frameReady = 1;
         return 1;
     }
 
     if (ctx->rxPos >= (UART_RX_BUF_SIZE - 1)) {
-        uint16_t i;
-
-        ctx->rxWorkBuf[UART_RX_BUF_SIZE - 1] = '\0';
-        for (i = 0; i < UART_RX_BUF_SIZE; i++) {
-            ctx->rxBuf[i] = ctx->rxWorkBuf[i];
-        }
+        ctx->rxBuf[UART_RX_BUF_SIZE - 1] = '\0';
         ctx->rxLen = UART_RX_BUF_SIZE - 1;
-        ctx->rxOvf = rxData;
+        ctx->rxOverflow = 1;
         ctx->rxFrameCount++;
-        ctx->rxDone = 1;
-        ctx->rxPos = 0;
-        ctx->rxWorkBuf[0] = '\0';
+        ctx->frameReady = 1;
+        ctx->discardUntilLF = 1;
         return 1;
     }
 
-    ctx->rxWorkBuf[ctx->rxPos] = rxData;
+    ctx->rxBuf[ctx->rxPos] = rxData;
     ctx->rxPos++;
     return 0;
 }
 
 uint8_t UART_RxIRQHandler(UART_Regs *uart)
 {
-    uint8_t frameReady;
     UART_Context *ctx;
 
     ctx = UART_getContext(uart);
@@ -429,14 +469,5 @@ uint8_t UART_RxIRQHandler(UART_Regs *uart)
         return 0;
     }
 
-    frameReady = UART_RxCallback(uart);
-    if (!frameReady) {
-        return 0;
-    }
-
-    if ((ctx != 0) && (ctx->rxMode == UART_RX_MODE_ISR_CALLBACK) && (ctx->onFrame != 0)) {
-        ctx->onFrame(ctx);
-    }
-
-    return 1;
+    return UART_RxCallback(uart);
 }

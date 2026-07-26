@@ -1,17 +1,38 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "uart_blocking_tx",
+  "lifecycle": "reference",
   "title": "UART0 Blocking TX",
   "description": "UART0 115200 8N1 blocking transmit smoke test with PB22 blink.",
   "board": "LCKFB Tianmengxing MSPM0G3507",
   "device": "MSPM0G3507",
   "package": "LQFP-64(PM)",
+  "product": "mspm0_sdk@2.10.00.04",
   "sdk": "MSPM0 SDK 2.10.00.04",
   "sysconfig": "1.27.0",
-  "validated": true,
-  "validation_level": "sysconfig_generated",
-  "prior_validation_level": "hardware_serial",
-  "physical_behavior_revalidated": false,
+  "content_sha256": "c2ba48b8234bf522836213f9cf61c905518d8f8f5acb6842a414a884898092b4",
+  "validation": {
+    "highest_level": "static",
+    "levels": {
+      "static": "passed",
+      "sysconfig_generation": "not_run",
+      "compile_link": "not_run",
+      "flash": "not_run",
+      "serial": "not_run",
+      "physical_behavior": "not_run"
+    },
+    "records": [
+      {
+        "level": "static",
+        "status": "passed",
+        "checked_at": "2026-07-26",
+        "board_revision": "not-observed",
+        "command": "python -B scripts/validate_skill.py .",
+        "artifact_sha256": "c2ba48b8234bf522836213f9cf61c905518d8f8f5acb6842a414a884898092b4",
+        "result": "仅静态包检查；未做 SysConfig 生成、编译/链接、烧录、串口测试或实物行为验证。"
+      }
+    ]
+  },
   "complexity": "basic",
   "clock": {
     "cpuclk_hz": 80000000,

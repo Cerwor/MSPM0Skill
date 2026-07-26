@@ -1,6 +1,7 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "blink",
+  "lifecycle": "reference",
   "title": "Tianqiaoxing PB22 LED Blink",
   "description": "Minimal active-low PB22 onboard LED blink baseline.",
   "board": "LCKFB Tianqiaoxing MSPM0G3519",
@@ -13,10 +14,29 @@
   "source_sysconfig": "1.24.0+4110",
   "compiler": "TI Arm Clang 4.0.4.LTS",
   "clock": {"cpuclk_hz": 32000000, "notes": "Internal default-clock baseline."},
-  "validated": true,
-  "validation_level": "sysconfig_syntax",
-  "prior_validation_level": "hardware",
-  "physical_behavior_revalidated": false,
+  "content_sha256": "5a32131c09f8c8ddfa17b23f2e9bc16fd6e978a244e83b6bae008c6c147562fb",
+  "validation": {
+    "highest_level": "static",
+    "levels": {
+      "static": "passed",
+      "sysconfig_generation": "not_run",
+      "compile_link": "not_run",
+      "flash": "not_run",
+      "serial": "not_run",
+      "physical_behavior": "not_run"
+    },
+    "records": [
+      {
+        "level": "static",
+        "status": "passed",
+        "checked_at": "2026-07-26",
+        "board_revision": "not-observed",
+        "command": "python -B scripts/validate_skill.py .",
+        "artifact_sha256": "5a32131c09f8c8ddfa17b23f2e9bc16fd6e978a244e83b6bae008c6c147562fb",
+        "result": "仅静态包检查；未做 SysConfig 生成、编译/链接、烧录、串口测试或实物行为验证。"
+      }
+    ]
+  },
   "complexity": "basic",
   "peripherals": ["GPIO", "SYSCTL", "Board"],
   "pins": ["PB22"],

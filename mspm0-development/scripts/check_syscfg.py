@@ -283,7 +283,7 @@ def find_validation_hints(root: Path) -> dict[str, str]:
     if len(ccxmls) == 1:
         hints["list_debug_cores"] = f'dslite -c "{ccxmls[0]}" -N'
         dss_script = Path(__file__).resolve().with_name("ccs_dss_debug.py")
-        hints["ccs_dss_probe"] = f'python "{dss_script}" "{root}" probe --leave-running'
+        hints["ccs_dss_inspect_target"] = f'python "{dss_script}" "{root}" inspect-target --leave-running'
     elif len(ccxmls) > 1:
         hints["ccs_target_config_selection"] = (
             "Multiple CCS targetConfigs/*.ccxml files found. Ask the user which probe/config to use before running DSLite or CCS-DSS commands."
@@ -839,7 +839,7 @@ def add_probe_check(root: Path, messages: list[Message], details: dict[str, obje
         messages.append(
             Message(
                 "warning",
-                "No supported debug probe was identified by the primary scan. This is inconclusive, not proof that no probe is connected; inspect OS USB/PnP and serial devices or use the backend's own probe command before flashing.",
+                "No supported debug probe was identified by the primary scan. This is inconclusive, not proof that no probe is connected; inspect OS USB/PnP and serial devices before choosing a backend.",
             )
         )
         return
@@ -872,7 +872,7 @@ def add_probe_check(root: Path, messages: list[Message], details: dict[str, obje
     mismatch = bool(configured_probe_kinds) and connected.kind not in configured_probe_kinds
     if mismatch:
         expected = ", ".join(sorted(configured))
-        for key in ("list_debug_cores", "ccs_dss_probe", "flash", "ccs_dss_run_to_main"):
+        for key in ("list_debug_cores", "ccs_dss_inspect_target", "flash", "ccs_dss_run_to_main"):
             hints.pop(key, None)
         hints["probe_mismatch"] = "Stop before flashing. Ask the user to confirm the intended probe/backend."
         messages.append(
@@ -883,7 +883,7 @@ def add_probe_check(root: Path, messages: list[Message], details: dict[str, obje
         )
     if connected.kind == "cmsis-dap":
         openocd_script = Path(__file__).resolve().with_name("openocd_debug.py")
-        hints["openocd_probe"] = f'python "{openocd_script}" "{root}" probe'
+        hints["openocd_inspect_target"] = f'python "{openocd_script}" "{root}" inspect-target'
         outputs = find_output_files(root)
         if len(outputs) == 1:
             hints["openocd_flash"] = f'python "{openocd_script}" "{root}" flash --program "{outputs[0]}"'
@@ -919,10 +919,10 @@ def print_text(root: Path, messages: list[Message], details: dict[str, object]) 
             "keil_build",
             "ccs_target_config_selection",
             "list_debug_cores",
-            "ccs_dss_probe",
+            "ccs_dss_inspect_target",
             "flash",
             "ccs_dss_run_to_main",
-            "openocd_probe",
+            "openocd_inspect_target",
             "openocd_flash",
             "probe_mismatch",
         ):
@@ -934,15 +934,26 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Check an MSPM0 project or classify a CCS Theia workspace root.")
     parser.add_argument("project", nargs="?", default=".", help="Path to a project or CCS Theia workspace directory.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
-    parser.add_argument("--probe", action="store_true", help="Also detect connected debug probes and compare them with project hints.")
+    parser.add_argument(
+        "--detect-probe",
+        action="store_true",
+        help="Read OS PnP/USB evidence and compare it with project hints; this does not connect to the target.",
+    )
+    parser.add_argument("--probe", dest="legacy_probe", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.legacy_probe:
+        print(
+            "warning: '--probe' 已弃用；此处只做 OS 级枚举，请改用 '--detect-probe'。",
+            file=sys.stderr,
+        )
+        args.detect_probe = True
 
     root = Path(args.project).resolve()
     messages, details = check_project(root)
     project_check_performed = details.get("project_check_performed", True) is True
-    if args.probe and project_check_performed:
+    if args.detect_probe and project_check_performed:
         add_probe_check(root, messages, details)
-    elif args.probe:
+    elif args.detect_probe:
         messages.append(Message("info", "输入是工作区容器，未执行探针检测；请先选择具体工程。"))
     has_error = any(msg.level == "error" for msg in messages)
 

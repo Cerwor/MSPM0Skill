@@ -500,9 +500,9 @@ def select_tool(
                 if not versions_match(selected.version, version)
             ]
             if mismatches:
-                raise ResolutionError(
-                    f"build-rule SysConfig {selected.version} conflicts with "
-                    f"{', '.join(mismatches)}; use --tool for an intentional override"
+                warnings.append(
+                    f"build-rule SysConfig {selected.version} differs from "
+                    f"{', '.join(mismatches)}; using the exact tool path from the active build rule"
                 )
             return selected, warnings, [selected]
 

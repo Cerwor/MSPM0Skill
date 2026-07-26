@@ -101,7 +101,7 @@ UART 时钟源和生成频率以当前生成配置为准；不要用无法支持
 
 ## UART DMA TX 与 IRQ RX
 
-下面只展示一个 UART 通道的关键差异。DMA 通道必须与工程现有分配协调；双 UART 完整模式不要从这里拼装。
+下面只展示 UART0 的关键差异。DMA 通道必须与工程现有分配协调；没有当前原理图、精确 SysConfig pinmux 和 UART 与板载 Flash 共存证据时，不得自行增加第二路 UART。
 
 ```js
 UART1.enabledInterrupts    = ["DMA_DONE_TX", "RX"];
@@ -115,11 +115,11 @@ UART1.DMA_CHANNEL_TX.dstLength   = "BYTE";
 UART1.DMA_CHANNEL_TX.peripheral.$suggestSolution = "DMA_CH0";
 ```
 
-完整双 UART 配置、自定义 BSP 和 ISR 入口见 [`uart_dma_tx_irq_rx`](../../assets/templates/tianmengxing/uart_dma_tx_irq_rx/example.syscfg) 及其 [`manifest.json`](../../assets/templates/tianmengxing/uart_dma_tx_irq_rx/manifest.json)。
+完整单路 UART0 配置、自定义 BSP 和 ISR 入口见 [`uart_dma_tx_irq_rx`](../../assets/templates/tianmengxing/uart_dma_tx_irq_rx/example.syscfg) 及其 [`manifest.json`](../../assets/templates/tianmengxing/uart_dma_tx_irq_rx/manifest.json)。该模板的 RX IRQ 只接收字节并置帧标志；`strtof`、`vsnprintf` 和 DMA 发送均由主循环处理。
 
 ## Timer 周期中断
 
-周期、实例和中断事件属于 `.syscfg`；NVIC 使能、启动计数器和 ISR 处理属于应用代码。TIMG12 只是已验证模板的明确分配，不是任意工程的默认空闲资源。
+周期、实例和中断事件属于 `.syscfg`；NVIC 使能、启动计数器和 ISR 处理属于应用代码。TIMG12 只是打包参考中的明确分配，当前 manifest 最高仅为 `static`，也不是任意工程的默认空闲资源。
 
 ```js
 const TIMER  = scripting.addModule("/ti/driverlib/TIMER", {}, false);

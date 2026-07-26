@@ -6,7 +6,7 @@ This file records where the unified skill came from, which source owns each clas
 
 ## Source families
 
-- `mspm0-skill-main` is the engineering core for project discovery, SysConfig checking/generation, probe detection, CCS DSS, OpenOCD, serial interaction, example indexing, and reusable-template metadata.
+- [`mspm0-skill-main`](https://github.com/mc3545dada/mspm0-skill) is the engineering core for project discovery, SysConfig checking/generation, probe detection, CCS DSS, OpenOCD, serial interaction, example indexing, and reusable-template metadata.
 - The Tianmengxing source contributes MSPM0G3507 board/peripheral facts and hardware-observed templates.
 - The Tianqiaoxing source contributes distilled MSPM0G3519 common-peripheral facts, board-independent TimerG QEI lessons, and a minimal GPIO smoke-test template.
 - Current [LCKFB Tianmengxing](https://wiki.lckfb.com/zh-hans/tmx-mspm0g3507/) and [LCKFB Tianqiaoxing](https://wiki.lckfb.com/zh-hans/tqx-mspm0g3519/index.html) board pages, download packages, and schematics are dynamic upstream evidence for board facts.
@@ -18,13 +18,31 @@ Bundled source license texts are retained under `references/maintenance/licenses
 
 | Source | Retained capability | Deliberate treatment |
 | --- | --- | --- |
-| `mspm0-skill-main/skills/mspm0-ccs` | All nine core scripts; project discovery; SysConfig generation; probe detection; serial, CCS DSS, and OpenOCD workflows; six compact G3507 templates | Five scripts remain byte-equivalent. Template listing/capture, workspace recognition, and bounded Windows probe discovery are maintained changes; the unified scaffolder is a maintained addition. |
+| `mspm0-skill-main/skills/mspm0-ccs` | Core project discovery, SysConfig generation, probe detection, serial, CCS DSS, OpenOCD, and compact G3507 template patterns | The retained utilities have since been maintained and extended. No byte-equivalence claim is made without a recorded upstream revision and per-file hashes. |
 | Standalone `mspm0-ccs` snapshot | Same core rules, snippets, examples, and hardware lessons | Screenshots, cache files, README files, and raw duplicate prose snippets are not copied. Their reusable content is represented by canonical templates and the normalized `references/runtime/sysconfig-patterns.md` view. |
 | `mspm0kit-tianmengxing` | Board pin/clock/occupancy facts and all six peripheral references | Board-local setup/build/flash/cleanup/serial scripts were consolidated into core discovery, project workflow, debug backends, and the unified scaffolder. Maintainer-local path defaults and implicit cleanup/device actions were not retained. |
 | `mspm0kit-tianqiaoxing` | Device/package baseline, common GPIO/ADC/PWM/Timer/QEI/UART/SPI/I2C patterns, and the minimal blink source/config | QEI is retained only as board-independent TimerG configuration, wrap-safe delta, scaling, and validation guidance rechecked against the matching TI SDK. No old QEI application code/config is copied; fixed encoder pins, button/display behavior, polling interval, board driver, and example template remain deliberately absent with the other board applications. |
 | CCS Theia-generated AI workspace metadata | Workspace-container recognition; conditional routing to actually exposed project, SysConfig, or debug tools; one-session/reload safety rules | `.mcp.json`, `.claude/`, `CLAUDE.md`, machine paths, and host allowlists are not copied. TI Arm Clang coverage is specialized and remains outside this distillation. |
 
 “Retained” means the usable knowledge or behavior has one maintained owner in this skill. It does not mean every source file is copied verbatim.
+
+## Provenance ledger
+
+| Source family | Upstream location | Retained snapshot identity | Bundled license evidence |
+| --- | --- | --- | --- |
+| `mspm0-skill-main` | <https://github.com/mc3545dada/mspm0-skill> | Archive snapshot; exact commit/release was not retained | `references/maintenance/licenses/mspm0-skill-main-MIT.txt`, SHA-256 `751d069e924b3d1d110f5662ed02ded891bffb3383c6091a15799e334ceb1608` |
+| `openkits-skills` board sources | <https://github.com/jlckfb/openkits-skills> and <https://gitee.com/lcsc/openkits-skills> | Archive snapshot; exact commit/release was not retained | `references/maintenance/licenses/openkits-skills-GPL-2.0.txt`, SHA-256 `8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643` |
+
+The original archive did not retain commit IDs, source-file hashes, or a complete per-file source-to-license map. Therefore this ledger is incomplete provenance, not a declaration that every retained line has been legally classified, and not evidence of a license violation. Before a public release, resolve the snapshot revisions where possible and review imported code/file mappings deliberately.
+
+## Toolchain compatibility evidence
+
+| Template baseline | Evidence in this package | Compatibility statement |
+| --- | --- | --- |
+| MSPM0 SDK 2.10.00.04 + SysConfig 1.27.x | Version metadata is embedded in the packaged `.syscfg` files; current manifests record static package checks only | Authored baseline; regeneration, compile/link, flash, serial, and physical behavior are not implied |
+| [MSPM0 SDK 2.11.00.07](https://software-dl.ti.com/msp430/esd/MSPM0-SDK/2_11_00_07/release_notes_mspm0_sdk_2_11_00_07.html) + SysConfig 1.28.x | TI publishes this SDK/tool combination, but this package has no retained generation/build record for it | Untested migration target; do not claim compatibility until exact-version generation and compilation pass |
+
+Always use the active project's declared SDK/SysConfig versions first. An installed newer tool is not authorization to rewrite project metadata or silently upgrade a template.
 
 ## Evidence precedence
 
@@ -48,15 +66,19 @@ When sources conflict, preserve the conflict explicitly and ask for missing hard
 - The old QEI/OLED application subtree does not carry self-contained component attribution and notices in the inspected snapshot. Do not copy code or config from it; any future import requires an explicit upstream license/notice review.
 - The old Tianmengxing peripheral snapshot claims PA0/PA1 board pull-ups without a bundled schematic. Official LCKFB CCS and Keil software-I2C tutorials use PA0/PA1 with opposite SDA/SCL roles, so tutorial wiring is not hardware-mux evidence. For hardware I2C0, treat PA0/SDA and PA1/SCL only as current MSPM0G3507 metadata candidates, and require the current schematic, external-module data, or measurement before claiming pull-ups.
 
-## Mature support
+## Maintained workflow coverage
 
-- Source and `.syscfg` inspection, generated-name checks, bounded SysConfig execution, template enumeration/capture, deterministic scaffolding, probe detection, serial monitoring, CCS DSS setup, and OpenOCD setup.
+- Source and `.syscfg` inspection, generated-name checks, bounded SysConfig execution, template enumeration/capture, deterministic scaffolding, OS-level probe detection, serial monitoring, CCS DSS setup, and OpenOCD setup.
 - Full maintained Tianmengxing routing plus bounded Tianqiaoxing routing for board facts in `references/hardware/`, with reusable cross-board methods in `references/peripherals/`.
+
+“Maintained workflow coverage” describes available guidance and tooling, not an end-to-end validation claim. Each template's manifest is the evidence source for what was actually checked.
 
 ## Partial or conditional support
 
 - Keil and CMake/GCC projects: inspect and preserve the existing project flow; local toolchain evidence determines exact commands.
 - Hardware I2C alternate pin routing: verify against the installed SysConfig device data and schematic.
+- Tianmengxing ADC, external/general-purpose SPI, I2C, and QEI have maintained references but no packaged minimal template. Creating one requires a selected signal/pin target, exact-board schematic review, matching SysConfig generation, and compile evidence; do not fill the gap with guessed static configurations.
+- Tianqiaoxing intentionally packages only the common-peripheral references and the active-low PB22 blink baseline. This follows the board-application boundary; it is not evidence that removed IMU, OLED/UI, WS2812, radio, or encoder applications were validated.
 - Advanced recovery: identify and explain, but do not automate unlock or mass erase.
 - CCS MCP integration: use only when the current host actually exposes the matching tool; generated workspace files alone are only read-only discovery evidence.
 

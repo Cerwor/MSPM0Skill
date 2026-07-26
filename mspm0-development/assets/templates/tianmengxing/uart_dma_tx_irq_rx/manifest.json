@@ -1,25 +1,46 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "uart_dma_tx_irq_rx",
-  "title": "UART DMA TX + IRQ RX Echo",
-  "description": "Verified dual-UART 115200 8N1 send/receive smoke-test example for agents: UART0 uses ISR complete-frame callbacks, UART1 uses poll-mode frame handling, DMA TX echoes/debugs responses, and optional ASCII float parsing demonstrates parameter input.",
+  "lifecycle": "reference",
+  "title": "UART0 DMA TX + IRQ RX Deferred Echo",
+  "description": "UART0 115200 8N1 reference in which the IRQ receives bytes and marks complete frames while the main loop performs deferred parsing, formatting, and DMA TX.",
   "board": "LCKFB Tianmengxing MSPM0G3507",
   "device": "MSPM0G3507",
   "package": "LQFP-64(PM)",
+  "product": "mspm0_sdk@2.10.00.04",
   "sdk": "MSPM0 SDK 2.10.00.04",
   "sysconfig": "1.27.0",
-  "validated": true,
-  "validation_level": "sysconfig_generated",
-  "prior_validation_level": "hardware_debug",
-  "physical_behavior_revalidated": false,
+  "content_sha256": "30aab090460e92645510b9f836027fa2d9f73a4a38f1d8052978e84d938bd1ff",
+  "validation": {
+    "highest_level": "static",
+    "levels": {
+      "static": "passed",
+      "sysconfig_generation": "not_run",
+      "compile_link": "not_run",
+      "flash": "not_run",
+      "serial": "not_run",
+      "physical_behavior": "not_run"
+    },
+    "records": [
+      {
+        "level": "static",
+        "status": "passed",
+        "checked_at": "2026-07-26",
+        "board_revision": "not-observed",
+        "command": "python -B scripts/validate_skill.py .",
+        "artifact_sha256": "30aab090460e92645510b9f836027fa2d9f73a4a38f1d8052978e84d938bd1ff",
+        "result": "仅静态包检查；未做 SysConfig 生成、编译/链接、烧录、串口测试或实物行为验证。"
+      }
+    ]
+  },
   "complexity": "intermediate",
   "clock": {
     "cpuclk_hz": 80000000,
     "uart_clock_hz": 40000000,
     "mfclk_hz": 4000000
   },
-  "peripherals": ["SYSCTL", "GPIO", "UART", "DMA"],
-  "pins": ["PB22", "PA10", "PA11", "PB6", "PB7"],
+  "peripherals": ["SYSCTL", "UART", "DMA"],
+  "pins": ["PA10", "PA11"],
   "source_files": ["src/empty.c", "src/BSP/UART.c", "src/BSP/UART.h"],
   "syscfg": "example.syscfg",
   "generated_names": [
@@ -27,28 +48,20 @@
     "UART_0_INST_INT_IRQN",
     "UART_0_INST_DMA_TRIGGER",
     "DMA_UART0Tx_CHAN_ID",
-    "UART_1_INST",
-    "UART_1_INST_INT_IRQN",
-    "UART_1_INST_DMA_TRIGGER",
-    "DMA_UART1Tx_CHAN_ID",
     "DL_UART_IIDX_DMA_DONE_TX",
     "DL_UART_IIDX_RX"
   ],
   "parameters": {
-    "uart0": "UART0",
-    "uart1": "UART1",
+    "uart": "UART0",
     "baud": 115200,
     "format": "8N1",
-    "uart0_tx_pin": "PA10",
-    "uart0_rx_pin": "PA11",
-    "uart1_tx_pin": "PB6",
-    "uart1_rx_pin": "PB7",
-    "uart0_dma_channel": "DMA_CH0",
-    "uart1_dma_channel": "DMA_CH1",
+    "tx_pin": "PA10",
+    "rx_pin": "PA11",
+    "dma_channel": "DMA_CH0",
     "rx_frame_end": "LF",
-    "rx_modes": ["UART_RX_MODE_NONE", "UART_RX_MODE_POLL", "UART_RX_MODE_ISR_CALLBACK"],
+    "rx_modes": ["UART_RX_MODE_NONE", "UART_RX_MODE_IRQ_DEFERRED"],
     "echo_protocol": "Send a text line such as ping\\n and the MCU replies over DMA TX.",
     "float_protocol": "Optional ASCII CSV parsing, for example 1.23,44,55.7\\n"
   },
-  "tags": ["uart", "dual-uart", "dma", "tx", "rx", "echo", "serial", "smoke-test", "float", "interrupt", "poll", "nvic", "context", "ch340", "vofa", "pid-tuning"]
+  "tags": ["uart", "dma", "tx", "rx", "echo", "serial", "smoke-test", "float", "interrupt", "deferred", "nvic", "context", "ch340", "vofa", "pid-tuning"]
 }

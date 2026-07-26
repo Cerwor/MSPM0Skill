@@ -220,38 +220,9 @@ int main(void)
 
 > **所有中断外设均适用此规则**，不只是 GPIO。Timer、UART、SPI 等中断也需在 `SYSCFG_DL_init()` 后手动调用对应的 `NVIC_EnableIRQ(XXX_INST_INT_IRQN)`。
 
-### 按键消抖与多操作（单击 / 双击 / 长按）
+### 按键消抖与多操作
 
-推荐使用 **MultiButton** 库，不要自己写消抖逻辑：
-
-> 仓库：https://github.com/0x1abin/MultiButton
-
-**接入方式**：
-1. 将 `multi_button.c` / `multi_button.h` 复制到项目根目录
-2. 实现引脚读取回调（低电平有效）：
-
-```c
-uint8_t btn_read_pin(void *btn)
-{
-    return DL_GPIO_readPins(BTN_PORT, BTN_USER_PIN) ? 1 : 0;
-}
-```
-
-3. 初始化并注册事件：
-
-```c
-Button btn;
-button_init(&btn, btn_read_pin, 0, 0);  /* active_level=0（低电平有效） */
-button_attach(&btn, SINGLE_CLICK,     on_single_click);
-button_attach(&btn, DOUBLE_CLICK,     on_double_click);
-button_attach(&btn, LONG_PRESS_START, on_long_press);
-button_start(&btn);
-```
-
-4. 主循环每 5 ms 调用一次（用 SysTick 或 Timer 中断驱动）：
-
-```c
-button_ticks();
-```
-
-> MultiButton 已内置消抖，无需额外处理抖动。
+- 单按键冒烟测试可以在前台检测到电平变化后做一次短忙等，再复读确认；不要把这种写法带入并发、低功耗或实时工程。
+- GPIO ISR 只清中断、记录候选电平或事件并置标志，不调用 `delay_cycles()`，不等待按键稳定，也不执行单击、双击或长按业务。
+- 并发工程复用现有 SysTick、Timer、RTOS tick 或单调时间戳，在主循环或任务中运行状态机：记录候选变化时间，持续稳定达到消抖窗口后再确认按下或释放，长按和多击也由同一时间基准派生。
+- 若项目已有按键库，沿用其调度和事件接口；不要为简单 GPIO 输入强制引入特定第三方库。

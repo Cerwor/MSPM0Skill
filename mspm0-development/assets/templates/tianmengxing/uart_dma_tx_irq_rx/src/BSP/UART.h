@@ -14,8 +14,7 @@
 
 typedef enum {
     UART_RX_MODE_NONE = 0,
-    UART_RX_MODE_POLL = 1,
-    UART_RX_MODE_ISR_CALLBACK = 2
+    UART_RX_MODE_IRQ_DEFERRED = 1
 } UART_RxMode;
 
 typedef struct UART_Context UART_Context;
@@ -26,14 +25,15 @@ struct UART_Context {
     UART_RxMode rxMode;
     UART_FrameCallback onFrame;
     volatile uint8_t txDMADone;
-    volatile uint8_t rxDone;
+    volatile uint8_t frameReady;
+    volatile uint8_t rxOverflow;
+    volatile uint8_t discardUntilLF;
     char txBuf[UART_TX_BUF_SIZE];
     char rxBuf[UART_RX_BUF_SIZE];
-    char rxWorkBuf[UART_RX_BUF_SIZE];
     volatile uint16_t rxPos;
     volatile uint16_t rxLen;
     volatile uint32_t rxFrameCount;
-    volatile uint8_t rxOvf;
+    volatile uint32_t rxDroppedFrameCount;
     float floatBuf[UART_FLOAT_BUF_SIZE];
     volatile uint16_t floatLen;
     volatile uint8_t floatParseError;

@@ -1,6 +1,7 @@
 /**
  * 嘉立创天猛星 MSPM0G3507 板载 PB22 LED 的 SysConfig 示例。
- * 已使用 MSPM0 SDK 2.10.00.04 和 SysConfig 1.27.0 完成生成与编译验证。
+ * 元数据基线为 MSPM0 SDK 2.10.00.04 和 SysConfig 1.27.0；
+ * 当前发布证据以同目录 manifest.json 为准。
  *
  * @cliArgs --device "MSPM0G350X" --part "Default" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
  * @v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
