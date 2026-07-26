@@ -179,6 +179,140 @@ class ProbePresentationTests(unittest.TestCase):
         self.assertIn("USB vendor: SEGGER", rendered)
         self.assertNotIn("localized host controller", rendered)
 
+    def test_probe_match_is_explicit_for_single_matching_target(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mspm0-probe-match-") as temp_dir:
+            root = Path(temp_dir)
+            target_dir = root / "targetConfigs"
+            target_dir.mkdir()
+            (target_dir / "target.ccxml").write_text(
+                '<connection id="SEGGER J-Link"/>\n',
+                encoding="utf-8",
+                newline="\n",
+            )
+            probe = DETECT_PROBE.Probe(
+                kind="jlink",
+                display_name="SEGGER J-Link",
+                manufacturer="",
+                usb_vendor="SEGGER",
+                usb_id="1366:0105",
+                serial_ports=[],
+                confidence="high",
+                recommended_backend="ccs_dss_or_vendor_tool",
+                recommended_config="",
+                evidence=[],
+            )
+            messages = []
+            details = {"validation_hints": {"flash": "safe placeholder"}}
+            with mock.patch.object(CHECK_SYSCFG, "detect_probes", return_value=[probe]):
+                CHECK_SYSCFG.add_probe_check(root, messages, details)
+
+            self.assertEqual(details["probe_config_match"]["status"], "matched")
+            self.assertIn("flash", details["validation_hints"])
+            self.assertTrue(any(message.level == "ok" and "matches" in message.text for message in messages))
+
+    def test_unrecognized_target_probe_suppresses_flash_hint(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mspm0-probe-unverified-") as temp_dir:
+            root = Path(temp_dir)
+            target_dir = root / "targetConfigs"
+            target_dir.mkdir()
+            (target_dir / "target.ccxml").write_text(
+                "<configurations/>\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            probe = DETECT_PROBE.Probe(
+                kind="jlink",
+                display_name="SEGGER J-Link",
+                manufacturer="",
+                usb_vendor="SEGGER",
+                usb_id="1366:0105",
+                serial_ports=[],
+                confidence="high",
+                recommended_backend="ccs_dss_or_vendor_tool",
+                recommended_config="",
+                evidence=[],
+            )
+            details = {"validation_hints": {"flash": "must be removed"}}
+            with mock.patch.object(CHECK_SYSCFG, "detect_probes", return_value=[probe]):
+                CHECK_SYSCFG.add_probe_check(root, [], details)
+
+            self.assertEqual(details["probe_config_match"]["status"], "unverified")
+            self.assertNotIn("flash", details["validation_hints"])
+            self.assertIn("probe_mismatch", details["validation_hints"])
+
+
+class PinSummaryTests(unittest.TestCase):
+    def make_gpio_project(self, root: Path, delay_expression: str) -> tuple[Path, list[Path], list[Path]]:
+        syscfg = root / "empty.syscfg"
+        syscfg.write_text(
+            "\n".join(
+                (
+                    'const GPIO1 = GPIO.addInstance();',
+                    'GPIO1.$name = "LED";',
+                    "GPIO1.associatedPins.create(1);",
+                    'GPIO1.associatedPins[0].$name = "PIN_22";',
+                    'GPIO1.associatedPins[0].initialValue = "CLEARED";',
+                    'GPIO1.associatedPins[0].assignedPort = "PORTB";',
+                    'GPIO1.associatedPins[0].assignedPin = "22";',
+                    'GPIO1.associatedPins[0].pin.$assign = "PB22";',
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        generated_dir = root / "Debug"
+        generated_dir.mkdir()
+        header = generated_dir / "ti_msp_dl_config.h"
+        header.write_text(
+            "#define CPUCLK_FREQ 32000000\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        generated_c = generated_dir / "ti_msp_dl_config.c"
+        generated_c.write_text(
+            "DL_GPIO_initDigitalOutput(LED_PIN_22_IOMUX);\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        source = root / "empty.c"
+        source.write_text(
+            "\n".join(
+                (
+                    "#define LED_HALF_PERIOD_CYCLES (CPUCLK_FREQ / 20U)",
+                    "while (1) {",
+                    "    DL_GPIO_togglePins(LED_PORT, LED_PIN_22_PIN);",
+                    f"    delay_cycles({delay_expression});",
+                    "}",
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        return syscfg, [header, generated_c], [source]
+
+    def test_pin_summary_reports_evidenced_gpio_toggle_frequency(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mspm0-pin-summary-") as temp_dir:
+            root = Path(temp_dir)
+            syscfg, generated, sources = self.make_gpio_project(root, "LED_HALF_PERIOD_CYCLES")
+            summaries = CHECK_SYSCFG.summarize_pin_usage([syscfg], generated, sources)
+
+            self.assertEqual(len(summaries), 1)
+            self.assertEqual(summaries[0]["pin"], "PB22")
+            self.assertEqual(summaries[0]["direction"], "output")
+            self.assertEqual(summaries[0]["behavior"], "software toggle")
+            self.assertEqual(summaries[0]["frequency_hz"], 10.0)
+
+    def test_pin_summary_does_not_guess_complex_delay_frequency(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mspm0-pin-summary-complex-") as temp_dir:
+            root = Path(temp_dir)
+            syscfg, generated, sources = self.make_gpio_project(root, "next_delay_cycles()")
+            summaries = CHECK_SYSCFG.summarize_pin_usage([syscfg], generated, sources)
+
+            self.assertEqual(summaries[0]["behavior"], "software toggle")
+            self.assertIsNone(summaries[0]["frequency_hz"])
+
 
 class SysConfigSelectionTests(unittest.TestCase):
     def test_build_rule_version_drift_is_non_blocking(self) -> None:

@@ -13,6 +13,8 @@
 - 提供 GPIO、80 MHz 时钟、UART、Timer IRQ 和空骨架的简洁 SysConfig 局部模式。
 - 从 CCS 工程构建规则发现 gmake、SysConfig、CCS scripting 和 DSLite 的实际路径，不依赖这些工具已加入 `PATH`。
 - 检测 J-Link、XDS110 等探针；对带匹配 `.ccxml` 的 CCS 工程优先使用结构化 CCS-DSS 烧录/调试，DSLite 仅作已发现时的备用路径，并保持设备操作的授权边界。
+- 对只修改 `.c/.h` 的已有工程提供快速路径：优先采用 `check_syscfg.py` 给出的构建、探针匹配和烧录命令，不必预读完整后端参考。
+- `check_syscfg.py --pin-summary` 可汇总有文件证据的引脚功能、方向和简单软件行为；仅在可证明时估算 GPIO 翻转频率。
 - 分别报告静态检查、SysConfig 生成、编译、烧录、串口和实物行为证据。
 - 支持 GPIO、UART、SPI、I2C、ADC、Timer、PWM、DMA、QEI 等常见 MSPM0 开发任务。
 
@@ -433,7 +435,7 @@ python -B scripts\validate_skill.py .
 python -B scripts\list_examples.py
 ```
 
-其中单元测试覆盖捕获器的 schema 2 端到端契约、负向校验规则、CCS 工具发现与烧录路由，以及使用 DriverLib 桩编译真实 `UART.c` 的主机端接收/DMA 状态机；它不连接开发板。
+其中单元测试覆盖捕获器的 schema 2 端到端契约、负向校验规则、CCS 工具发现与烧录路由、探针匹配、引脚摘要，以及使用 DriverLib 桩编译真实 `UART.c` 的主机端接收/DMA 状态机；它不连接开发板。
 
 如果本机有系统 `skill-creator`，还应运行其 `quick_validate.py`：
 

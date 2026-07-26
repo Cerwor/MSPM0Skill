@@ -464,23 +464,10 @@ def check_qei_reference(root: Path, findings: list[Finding]) -> None:
                 Finding("error", relative(board_path, root), "板级外设索引未路由到 QEI 参考")
             )
 
-    skill_text = read_utf8(root / "SKILL.md", findings, root)
-    if skill_text is not None:
-        routing = re.search(
-            r"(?ms)^## Quick Routing\s*$\n(?P<body>.*?)(?=^## |\Z)",
-            skill_text,
-        )
-        if routing is None:
-            findings.append(Finding("error", "SKILL.md", "无法解析 Quick Routing 段"))
-        else:
-            routing_targets = {
-                target.strip().split("#", 1)[0]
-                for target in MARKDOWN_LINK_RE.findall(routing.group("body"))
-            }
-            if "references/peripherals/qei.md" not in routing_targets:
-                findings.append(
-                    Finding("error", "SKILL.md", "Quick Routing 未路由到通用 QEI 参考")
-                )
+    routing_path = root / "references" / "task-routing.md"
+    routing_text = read_utf8(routing_path, findings, root)
+    if routing_text is not None and "peripherals/qei.md" not in routing_text:
+        findings.append(Finding("error", relative(routing_path, root), "详细路由未指向通用 QEI 参考"))
 
 
 def check_i2c_reference(root: Path, findings: list[Finding]) -> None:
@@ -602,22 +589,10 @@ def check_i2c_reference(root: Path, findings: list[Finding]) -> None:
                 Finding("error", relative(board_path, root), "板级外设索引未路由到 I2C 参考")
             )
 
-    skill_text = read_utf8(root / "SKILL.md", findings, root)
-    if skill_text is None:
-        return
-    routing = re.search(
-        r"(?ms)^## Quick Routing\s*$\n(?P<body>.*?)(?=^## |\Z)",
-        skill_text,
-    )
-    if routing is None:
-        findings.append(Finding("error", "SKILL.md", "无法解析 Quick Routing 段"))
-        return
-    routing_targets = {
-        target.strip().split("#", 1)[0]
-        for target in MARKDOWN_LINK_RE.findall(routing.group("body"))
-    }
-    if "references/peripherals/i2c.md" not in routing_targets:
-        findings.append(Finding("error", "SKILL.md", "Quick Routing 未路由到通用 I2C 参考"))
+    routing_path = root / "references" / "task-routing.md"
+    routing_text = read_utf8(routing_path, findings, root)
+    if routing_text is not None and "peripherals/i2c.md" not in routing_text:
+        findings.append(Finding("error", relative(routing_path, root), "详细路由未指向通用 I2C 参考"))
 
 
 def check_sysconfig_patterns(root: Path, findings: list[Finding]) -> None:
@@ -904,22 +879,10 @@ def check_sysconfig_patterns(root: Path, findings: list[Finding]) -> None:
                 )
             )
 
-    skill_text = read_utf8(root / "SKILL.md", findings, root)
-    if skill_text is None:
-        return
-    routing = re.search(
-        r"(?ms)^## Quick Routing\s*$\n(?P<body>.*?)(?=^## |\Z)",
-        skill_text,
-    )
-    if routing is None:
-        findings.append(Finding("error", "SKILL.md", "无法解析 Quick Routing 段"))
-        return
-    routing_targets = {
-        target.strip().split("#", 1)[0]
-        for target in MARKDOWN_LINK_RE.findall(routing.group("body"))
-    }
-    if "references/runtime/sysconfig-patterns.md" not in routing_targets:
-        findings.append(Finding("error", "SKILL.md", "Quick Routing 未路由到 SysConfig 局部模式参考"))
+    routing_path = root / "references" / "task-routing.md"
+    routing_text = read_utf8(routing_path, findings, root)
+    if routing_text is not None and "runtime/sysconfig-patterns.md" not in routing_text:
+        findings.append(Finding("error", relative(routing_path, root), "详细路由未指向 SysConfig 局部模式参考"))
 
 
 def manifest_files(manifest: dict[str, object]) -> list[str]:
@@ -1759,6 +1722,9 @@ def check_ccs_tooling_contract(root: Path, findings: list[Finding]) -> None:
             "dslite_flash_fallback",
             "ccs_dss_debug.py",
             "sysconfig_isolated",
+            "summarize_pin_usage",
+            "--pin-summary",
+            "probe_config_match",
         ),
         "scripts/detect_probe.py": (
             "KNOWN_USB_VENDOR_NAMES",
@@ -1766,15 +1732,29 @@ def check_ccs_tooling_contract(root: Path, findings: list[Finding]) -> None:
             "ccs_dss_or_vendor_tool",
         ),
         "references/workflows/project-lifecycle.md": (
+            "## Source-Only Fast Change",
             "## CCS CLI Tool Discovery",
             r"<ccs-install>\ccs\utils\bin\gmake.exe",
             "do not require a duplicate standalone generation first",
+            "shortest valid branch",
         ),
         "references/debugging/backends.md": (
             "## CCS-DSS Programming And Debug Backend",
             "## DSLite Fallback",
             "dslite_silent_failure",
             "prefer CCS-DSS over direct DSLite",
+        ),
+        "SKILL.md": (
+            "Existing project, source-only change",
+            "preferred source for exact build and flash commands",
+            "Validation Shortcuts",
+            "Follow the user's language",
+        ),
+        "references/task-routing.md": (
+            "peripherals/i2c.md",
+            "peripherals/qei.md",
+            "runtime/sysconfig-patterns.md",
+            "maintenance/maintenance.md",
         ),
     }
     texts: dict[str, str] = {}

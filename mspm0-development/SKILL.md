@@ -13,76 +13,43 @@ description: Develop, inspect, modify, validate, scaffold, build, flash, and deb
 - Prefer the user's project and matching local SDK metadata over bundled templates.
 - Report `static`, `sysconfig_generation`, `compile_link`, `flash`, `serial`, and `physical_behavior` independently. A passed lower level never implies a higher one.
 - Treat Tianmengxing as the primary maintained board. When the board is not explicit, identify it from project or hardware evidence instead of assuming Tianmengxing.
-- For Tianmengxing or Tianqiaoxing, prefer the exact board schematic, current LCKFB material, and matching board guide for board-level facts.
-- Keep Tianqiaoxing support at the common-peripheral layer. For a removed board application, use only the current material supplied for that task and do not reconstruct it from remembered wiring.
-- Use TI LaunchPad material only for transferable device, SDK, SysConfig, and tool behavior; never import its LED, UART, button, sensor, pin, package, or probe defaults into an LCKFB board.
+- Use exact LCKFB board evidence for pins and onboard hardware. Use TI LaunchPad material only for transferable device/tool behavior.
+- Follow the user's language. Workflow/general references may use English for stable tool terms; LCKFB board facts and script diagnostics may use Chinese.
 
 ## Quick Routing
 
-Read only one Tier-1 reference first. Load Tier-2 only when the task needs that detail or the first attempt lacks evidence.
+- **Existing project, source-only change:** run `python -B scripts/check_syscfg.py <project> --detect-probe` first. Its output is the preferred source for exact build and flash commands. If `.syscfg` and hardware assignments stay unchanged, one `.ccxml` and one `.out` are selected, and the detected probe matches the target configuration, edit `.c/.h`, build, and—only with user intent—flash without reading a reference.
+- **Change `.syscfg`, pins, clocks, or peripherals:** read [project-lifecycle.md](references/workflows/project-lifecycle.md), then use [task-routing.md](references/task-routing.md) to select only one matching runtime/board/peripheral reference.
+- **Create or reuse a project:** read [scaffolding.md](references/workflows/scaffolding.md) and inspect metadata with `python -B scripts/list_examples.py`; open only the chosen template.
+- **Ambiguity, mismatch, failed device action, or advanced debug:** read [backends.md](references/debugging/backends.md). Do not load it for a confirmed source-only fast path.
 
-| User task | Tier-1 first read | Tier-2 conditional read | Expected result |
-| --- | --- | --- | --- |
-| Inspect or modify an existing CCS, Keil, or CMake project; edit `.syscfg`; build | [project-lifecycle.md](references/workflows/project-lifecycle.md) | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) for runtime code | Minimal source/config change with an evidence-based validation chain |
-| Add GPIO, UART, SPI, ADC, PWM, DMA, interrupt, clock, or external module | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) | Matching board/peripheral guide; use [sysconfig-patterns.md](references/runtime/sysconfig-patterns.md) only when its Contents lists a matching pattern | SysConfig/DriverLib implementation using local generated names |
-| Select an MSPM0G3507 Timer instance or calculate its period/range | [timer.md](references/hardware/tianmengxing-peripherals/timer.md) | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) for ISR/runtime integration | Exact discrete instances and a divider/prescaler-aware calculation without board-pin assumptions |
-| Add an I2C controller/target or diagnose an I2C bus | [i2c.md](references/peripherals/i2c.md) | Matching board I2C guide, current schematic, and target-device datasheet | Electrically safe transaction flow with bounded waits and observable validation |
-| Add a quadrature encoder or configure TimerG QEI | [qei.md](references/peripherals/qei.md) | Matching board guide, current schematic, and installed SDK `timg_qei_mode` example | Pin-safe QEI design with explicit count scaling and wrap handling |
-| Create a new project or select a reusable start | [scaffolding.md](references/workflows/scaffolding.md) | Matching board guide; then one selected asset | A dry-run-reviewed, non-overwriting project scaffold |
-| Detect a probe, flash, inspect registers, set breakpoints, or diagnose a debug backend | [backends.md](references/debugging/backends.md) | [hardware-validation.md](references/troubleshooting/hardware-validation.md) after failure | Explicit backend selection and bounded device action |
-| Use Tianmengxing MSPM0G3507 pins or onboard devices | [tianmengxing.md](references/hardware/tianmengxing.md) | One file under `references/hardware/tianmengxing-peripherals/` | Board-correct pins, polarity, clock, and template choice |
-| Use Tianqiaoxing MSPM0G3519 GPIO, ADC, PWM, Timer, QEI, UART, SPI, or I2C | [tianqiaoxing.md](references/hardware/tianqiaoxing.md) | One matching board file and, when routed, one generic peripheral reference | Minimal board adaptation without bundled board-application assumptions |
-| Maintain, extend, validate, or install this skill | [maintenance.md](references/maintenance/maintenance.md) | [sources-and-boundaries.md](references/maintenance/sources-and-boundaries.md) | Ownership-preserving update with package validation |
-
-Do not create another exhaustive task-routing table in a reference.
+For less common Timer, I2C, QEI, board, template, and maintenance tasks, read [task-routing.md](references/task-routing.md) only when needed.
 
 ## Template Selection
 
-Use `python -B scripts/list_examples.py` to inspect metadata before opening template files. Add `--board`, `--peripheral`, or `--tag` when narrowing the list.
-
-| Need | Starting asset | Required reference |
-| --- | --- | --- |
-| Tianmengxing empty, blink, PWM, Timer IRQ, blocking UART, or UART DMA/IRQ | `assets/templates/tianmengxing/<template>/` | [tianmengxing.md](references/hardware/tianmengxing.md) |
-| Tianqiaoxing common GPIO smoke test | `assets/templates/tianqiaoxing/blink/` | [tianqiaoxing.md](references/hardware/tianqiaoxing.md) |
-| New CCS scaffold from a packaged template or local SDK example | `python -B scripts/scaffold_project.py --help` | [scaffolding.md](references/workflows/scaffolding.md) |
-
-Treat templates as starting evidence, not universal project layouts. Copy only the needed pattern into an existing project.
-
-Packaged templates currently carry `static` evidence only. Read each schema-2 manifest before reuse; do not promote an old observation or a successful static check into SysConfig, build, flash, serial, or physical-behavior evidence.
+- Filter `list_examples.py` with `--board`, `--peripheral`, or `--tag` before opening files.
+- Treat templates as starting evidence, not universal layouts; copy only the needed pattern.
+- Packaged templates carry `static` evidence only unless their schema-2 manifest proves a higher level.
 
 ## Safety Boundary
 
-### Default read-only
+- Read-only inspection and OS-level probe enumeration are safe defaults.
+- Source/config edits stay within user-authorized files and preserve unrelated content.
+- Flash, reset, halt, debugger attach, state-changing serial commands, destructive recovery, and hardware/toolchain identity changes require explicit user intent or evidence.
+- A unique `.ccxml` plus unique output is not enough by itself: for the fast path, the detected probe must also match the target configuration and the user must have requested the device action.
+- Never guess among multiple `.syscfg`, probes, target configurations, or outputs; never hand-edit generated files as the source fix.
+- Never automate unlock, mass erase, factory reset, or replacement `.ccxml` creation during recovery.
+- After a failed device action, stop repeated writes and load [backends.md](references/debugging/backends.md).
 
-- Inspect files, manifests, generated headers, tool versions, PnP/serial devices, and OS-level probe listings.
-- Run `check_syscfg.py`, `run_sysconfig.py --dry-run`, `detect_probe.py`, validators, and CLI `--help`.
+## Validation Shortcuts
 
-### Ordinary reversible changes
-
-- Modify user-authorized source and `.syscfg` files while preserving unrelated content.
-- Create a new project only in a new destination after reviewing `scaffold_project.py --dry-run`.
-- Generate SysConfig output only in the wrapper-created temporary directory unless the user explicitly invokes the project build.
-
-### Require explicit user intent
-
-- Program flash, reset or halt a target, run backend `inspect-target`, attach a debugger, send serial commands that change device state, or overwrite/remove user files.
-- Change device, package, SDK, compiler, SysConfig tool version, board, clock source, probe configuration, or electrical pin assignment when project evidence is insufficient.
-
-### Never assume or automate
-
-- Never hand-edit generated SysConfig/build outputs as the source fix.
-- Never select among multiple probes, `.ccxml` files, firmware outputs, or `.syscfg` files by guess.
-- Never treat `.mcp.json`, Claude allowlists, or CCS-generated workspace metadata as proof that a tool is callable or that a device/project mutation is authorized.
-- Never auto-unlock, mass erase, factory reset, or create a replacement `.ccxml` during recovery.
-- Never claim physical behavior from source, generation, build, or flash success alone.
-
-After a failed device action, stop repeated writes, preserve logs, return to read-only detection, and follow the recovery section of [backends.md](references/debugging/backends.md).
+- `.c/.h` only: run static checks and the project build. For a generated CCS makefile, its successful SysConfig generation is sufficient; skip standalone `run_sysconfig.py`.
+- `.syscfg` changed: validate generation before or as part of the authoritative project build; use isolated `run_sysconfig.py` when early separation is useful.
+- Report only reached levels. Flash success never proves `serial` or `physical_behavior`.
 
 ## Delivery
 
 - State changed files and the exact validation levels reached.
-- Report warnings independently from success.
-- Name every user decision or hardware fact still required.
-- For board work, include pin, voltage/protocol assumptions, probe/backend, and whether behavior was physically observed.
+- Report warnings, unresolved hardware facts, probe/backend, and physical observation independently.
 - After changing this skill, run `python -B scripts/validate_skill.py .` and the system `quick_validate.py`.
 - Only when preparing an installation or release, validate the copied/packaged artifact and compare it with the validated repository source.
