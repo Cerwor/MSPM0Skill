@@ -1752,6 +1752,59 @@ def check_ccs_workspace_classification(root: Path, findings: list[Finding]) -> N
         )
 
 
+def check_ccs_tooling_contract(root: Path, findings: list[Finding]) -> None:
+    required_tokens = {
+        "scripts/check_syscfg.py": (
+            "discover_ccs_tools",
+            "dslite_flash_fallback",
+            "ccs_dss_debug.py",
+            "sysconfig_isolated",
+        ),
+        "scripts/detect_probe.py": (
+            "KNOWN_USB_VENDOR_NAMES",
+            "usb_vendor",
+            "ccs_dss_or_vendor_tool",
+        ),
+        "references/workflows/project-lifecycle.md": (
+            "## CCS CLI Tool Discovery",
+            r"<ccs-install>\ccs\utils\bin\gmake.exe",
+            "do not require a duplicate standalone generation first",
+        ),
+        "references/debugging/backends.md": (
+            "## CCS-DSS Programming And Debug Backend",
+            "## DSLite Fallback",
+            "dslite_silent_failure",
+            "prefer CCS-DSS over direct DSLite",
+        ),
+    }
+    texts: dict[str, str] = {}
+    for relative_path, tokens in required_tokens.items():
+        path = root / relative_path
+        text = read_utf8(path, findings, root)
+        if text is None:
+            continue
+        texts[relative_path] = text
+        missing = [token for token in tokens if token not in text]
+        if missing:
+            findings.append(
+                Finding(
+                    "error",
+                    relative_path,
+                    "CCS 工具与烧录路由契约缺少：" + ", ".join(missing),
+                )
+            )
+
+    checker = texts.get("scripts/check_syscfg.py", "")
+    if re.search(r'hints\["flash"\]\s*=\s*f?[\'"]dslite\b', checker, flags=re.IGNORECASE):
+        findings.append(
+            Finding(
+                "error",
+                "scripts/check_syscfg.py",
+                "DSLite 不得重新成为默认 flash 提示；应保持为条件性 fallback",
+            )
+        )
+
+
 def validate(root: Path) -> list[Finding]:
     findings: list[Finding] = []
     if not (root / "SKILL.md").is_file():
@@ -1767,6 +1820,7 @@ def validate(root: Path) -> list[Finding]:
     check_qei_reference(root, findings)
     check_i2c_reference(root, findings)
     check_sysconfig_patterns(root, findings)
+    check_ccs_tooling_contract(root, findings)
     check_templates(root, findings)
     check_uart_template_safety(root, findings)
     check_tianmengxing_device_instances(root, findings)

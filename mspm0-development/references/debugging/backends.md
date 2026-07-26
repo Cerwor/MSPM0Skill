@@ -7,7 +7,8 @@ Use this reference when the user asks the agent to flash or debug a connected MS
 ## Contents
 
 - Read-only OS probe detection and backend selection
-- CCS DSS/UniFlash operations
+- CCS-DSS programming and debugging
+- Optional DSLite fallback and silent-failure handling
 - OpenOCD/GDB operations
 - Failure containment and recovery boundaries
 
@@ -36,7 +37,7 @@ Use this conditional backend only when the current agent session actually expose
 
 If the tool is not exposed, use CCS-DSS below or another explicitly selected backend. Never launch a command copied from workspace metadata.
 
-## CCS-DSS Backend
+## CCS-DSS Programming And Debug Backend
 
 CCS Debug Server Scripting is abbreviated as `ccs-dss` in this skill. Use it for CCS / CCS Theia / UniFlash tooling. Do not apply these commands to a CMake/OpenOCD project unless that project also has a valid CCS `.ccxml` and the user explicitly wants CCS DSS.
 
@@ -48,6 +49,12 @@ CCS Debug Server Scripting is abbreviated as `ccs-dss` in this skill. Use it for
 - Uses the debug probe selected inside `.ccxml`, so it is not limited to J-Link. It can also work with CCS-supported probes such as XDS110 when the `.ccxml` matches the connected hardware.
 - Does not cover OpenOCD/GDB debugging. Use the separate backend below.
 
+For an existing CCS project with one matching `.ccxml` and one selected `.out`,
+prefer CCS-DSS over direct DSLite. The helper emits structured JSON events,
+refuses ambiguous target/program selections, and covers program, reset, run,
+symbol, breakpoint, and register operations through one backend. DSLite remains
+an optional fallback, not the default `flash` hint.
+
 ## Safety Rules
 
 - Debug actions can halt the CPU and disturb real-time behavior. Warn the user before halting a motor, power stage, or time-sensitive control loop.
@@ -56,7 +63,7 @@ CCS Debug Server Scripting is abbreviated as `ccs-dss` in this skill. Use it for
 - If a source-line breakpoint fails but symbol breakpoints work, treat it as a debug-info/source-line mapping issue first, not proof that the board or probe failed.
 - If connect/list-core operations hang, close stale CCS, DSLite, UniFlash, J-Link, or debug-server processes before retrying.
 
-## Script
+## Programming And Debug Commands
 
 From this skill package:
 
@@ -113,6 +120,36 @@ build rules, then common TI install roots. A build-rule path such as
 metadata. Pass `--ccs-run` when the installation uses another layout.
 
 When a project contains multiple `.ccxml` files or a command that needs a program finds multiple `.out` files, pass `--ccxml` or `--out` explicitly. The helper refuses to guess because selecting an old build or a target configuration for the wrong probe can produce misleading results or program unintended firmware.
+
+A successful CCS-DSS programming sequence includes structured events for
+`configured`, `connected`, `program_loaded`, the selected reset, and
+`left_target_running`. Treat `program_loaded` as flash-tool evidence only; it
+does not prove the external pin or application behavior.
+
+## DSLite Fallback
+
+Use DSLite only when `check_syscfg.py` finds the executable and the project has
+one matching `.ccxml` plus one selected `.out`. On Windows its common layout is:
+
+```text
+<ccs-install>\ccs\ccs_base\DebugServer\bin\DSLite.exe
+```
+
+Invoke the absolute executable path from PowerShell or `cmd.exe`; do not assume
+the bare `dslite` command is on `PATH`. Some CCS installations return a nonzero
+exit code with empty stdout and stderr for unsupported, incomplete, or failed
+DSLite invocations. If a real DSLite operation does this:
+
+1. Record `dslite_silent_failure` with the exact command and exit code.
+2. Do not diagnose the firmware, probe, or target from the empty output.
+3. Do not repeat writes through different shells.
+4. Return to read-only probe/config checks, then use CCS-DSS when its
+   prerequisites match.
+
+Git Bash, WSL, and other Unix-like shells add path conversion and process-launch
+variables on Windows. Prefer PowerShell/cmd for DSLite, but do not claim the
+shell alone caused a failure without a controlled comparison. Do not wrap
+DSLite inside `ccs_dss_debug.py`; they remain distinct backends.
 
 ## Historical backend observations
 

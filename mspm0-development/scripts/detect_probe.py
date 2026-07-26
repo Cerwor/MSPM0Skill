@@ -21,6 +21,13 @@ KNOWN_USB_IDS = {
 KNOWN_USB_VENDORS = {
     "1366": ("jlink", "SEGGER J-Link"),
 }
+KNOWN_USB_VENDOR_NAMES = {
+    "1366": "SEGGER",
+    "0451": "Texas Instruments",
+    "0483": "STMicroelectronics",
+    "0D28": "Arm",
+    "EF1A": "Horco",
+}
 KNOWN_STLINK_PIDS = {"3744", "3748", "374B", "374D", "3752"}
 
 
@@ -29,6 +36,7 @@ class Probe:
     kind: str
     display_name: str
     manufacturer: str
+    usb_vendor: str
     usb_id: str
     serial_ports: list[str]
     confidence: str
@@ -63,6 +71,11 @@ def normalize_usb_id(instance_id: str, hardware_ids: list[str]) -> str:
     return ""
 
 
+def usb_vendor_name(usb_id: str) -> str:
+    vid, _separator, _pid = usb_id.partition(":")
+    return KNOWN_USB_VENDOR_NAMES.get(vid.upper(), "")
+
+
 def classify_probe(text: str, usb_id: str = "") -> tuple[str, str, str, str, str]:
     lowered = text.lower()
     if usb_id in KNOWN_USB_IDS:
@@ -87,9 +100,9 @@ def classify_probe(text: str, usb_id: str = "") -> tuple[str, str, str, str, str
 
 def probe_defaults(kind: str) -> tuple[str, str, str, str]:
     if kind == "jlink":
-        return ("jlink", "high", "dslite_or_jlink", "")
+        return ("jlink", "high", "ccs_dss_or_vendor_tool", "")
     if kind == "xds110":
-        return ("xds110", "high", "dslite_or_ccs_dss", "")
+        return ("xds110", "high", "ccs_dss", "")
     if kind == "stlink":
         return ("stlink", "high", "openocd", "interface/stlink.cfg")
     if kind == "cmsis-dap":
@@ -143,6 +156,8 @@ def merge_probe(existing: Probe, candidate: Probe) -> None:
     existing.evidence.extend(item for item in candidate.evidence if item not in existing.evidence)
     if not existing.manufacturer:
         existing.manufacturer = candidate.manufacturer
+    if not existing.usb_vendor:
+        existing.usb_vendor = candidate.usb_vendor
     if existing.display_name == existing.kind and candidate.display_name != candidate.kind:
         existing.display_name = candidate.display_name
 
@@ -245,6 +260,7 @@ def detect_windows() -> list[Probe]:
             kind=kind,
             display_name=mapped_name or (texts[0] if texts else kind),
             manufacturer=first_string(device.get("Manufacturer")).strip(),
+            usb_vendor=usb_vendor_name(usb_id),
             usb_id=usb_id,
             serial_ports=ports,
             confidence=confidence,
@@ -286,6 +302,7 @@ def detect_linux() -> list[Probe]:
                 kind=kind,
                 display_name=mapped_name or values["product"] or kind,
                 manufacturer=values["manufacturer"],
+                usb_vendor=usb_vendor_name(usb_id),
                 usb_id=usb_id,
                 serial_ports=[],
                 confidence=confidence,
@@ -318,7 +335,9 @@ def print_text(probes: list[Probe]) -> None:
     for index, probe in enumerate(probes, start=1):
         print(f"Probe {index}: {probe.kind}")
         print(f"  Device: {probe.display_name}")
-        if probe.manufacturer:
+        if probe.usb_vendor:
+            print(f"  USB vendor: {probe.usb_vendor}")
+        elif probe.manufacturer:
             print(f"  Manufacturer: {probe.manufacturer}")
         if probe.usb_id:
             print(f"  USB ID: {probe.usb_id}")
