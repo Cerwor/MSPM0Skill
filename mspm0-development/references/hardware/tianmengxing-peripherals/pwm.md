@@ -2,196 +2,68 @@
 
 ## Scope
 
-天猛星 MSPM0G3507 的定时器 PWM 输出、引脚选择与板载 LED 呼吸灯模式。
+本参考负责天猛星 MSPM0G3507 的 Timer PWM 实例、已核对的板载引脚和运行时边界。
 
-## Contents
+## Device instances
 
-- 可用定时器实例与引脚约束
-- SysConfig 配置模式
-- DriverLib 运行时控制与验证
+MSPM0G3507 的 Timer 实例是 TIMG0、TIMG6、TIMG7、TIMG8、TIMG12、TIMA0 和 TIMA1。不存在 `TIMG2`。不同实例的位宽、通道、QEI、dead-band 和 shadow 能力不同，必须从当前器件 metadata 求解。
 
-## SDK Example
+## Board mappings
 
-`timg_32bit_timer_mode_pwm_edge_sleep` — 32-bit PWM edge-aligned with sleep
+只保留下列已经用 TI LQFP-64 pinmux 与板载连接交叉核对的映射：
 
-## Pin Mapping (LP → Tianmengxing)
+| Board pin | Timer channel | Board function | Constraint |
+| --- | --- | --- | --- |
+| PB22 | TIMG8 CCP1 | 板载 LED，高有效 | 与任何其他 TIMG8 用途互斥 |
+| PB26 | TIMG6 CCP0 | LCD 背光 | 与任何其他 TIMG6 用途互斥 |
 
-SDK uses TIMG12 on PB6(C0)/PB7(C1).
-Tianmengxing: PB6/PB7 occupied by SPI Flash → use TIMG0 or TIMG2 on free pins.
+旧文档中的 PB26/TIMG8、PA3/TIMG0、PA4/TIMG0、PB0/TIMG6、PB2/TIMG6-CCP1 和 PB4/TIMG8 映射均不可使用。选择其他 PWM 引脚时，从精确 SysConfig metadata 重新求解，不按“空闲 GPIO”猜测 Timer 通道。
 
-## Available Timer Instances for PWM
+## Canonical PB22 pattern
 
-| Timer | Status | Tianmengxing Usage |
-|-------|--------|--------------------|
-| TIMA0 | Free | PWM, capture |
-| TIMA1 | Free | PWM, capture |
-| TIMG0 | Free | General PWM |
-| TIMG6 | Free | General PWM |
-| TIMG8 | Free | General PWM or QEI；同一工程内互斥 |
-| TIMG12 | Free | General PWM (on free pins) |
-
-## Timer → Pin Mapping (CRITICAL)
-
-板载 LED 及常用引脚的 PWM 定时器通道映射（LQFP-64）。PB22 **可以用硬件 PWM**（TIMG8 CCP1），不是只能做 GPIO：
-
-TIMG8 的 PWM/Timer 配置与 QEI 互斥。若工程改用 [QEI](qei.md)，PB22 LED 和 PB26 背光不能同时继续使用 TIMG8 PWM；先在 SysConfig 中释放整个实例，再重新求解资源。
-
-| Pin | Timer Channel | SysConfig `ccpPin` | 备注 |
-|-----|--------------|-------------------|------|
-| **PB22** | **TIMG8 CCP1** | `PWM1.peripheral.ccp1Pin.$assign = "PB22"` | 板载 LED 硬件 PWM ✅ |
-| PB26 | TIMG8 CCP0 | `ccp0Pin.$assign = "PB26"` | LCD 背光 |
-| PA3 | TIMG0 CCP0 | `ccp0Pin.$assign = "PA3"` | 自由引脚 |
-| PA4 | TIMG0 CCP1 | `ccp1Pin.$assign = "PA4"` | 自由引脚 |
-| PB0 | TIMG6 CCP0 | `ccp0Pin.$assign = "PB0"` | 自由引脚 |
-| PB2 | TIMG6 CCP1 | `ccp1Pin.$assign = "PB2"` | 自由引脚 |
-| PB4 | TIMG8 CCP0 | `ccp0Pin.$assign = "PB4"` | 自由引脚 |
-
-> **查找方法**：在 SysConfig 设备数据中搜索 `reverseMuxes`：
-> `<sysconfig-root>\dist\deviceData\MSPM0G350X\MSPM0G350X.json`
-
-### PB22 硬件 PWM 完整 SysConfig
+完整配置由 [`pwm_breath_led`](../../../assets/templates/tianmengxing/pwm_breath_led/example.syscfg) 负责。局部关键值是：
 
 ```js
-const PWM  = scripting.addModule("/ti/driverlib/PWM", {}, false);
-const PWM1 = PWM.addInstance();
-
-PWM1.$name                      = "PWM_LED";
-PWM1.pwmMode                    = "EDGE_ALIGN_UP";
-PWM1.ccIndex                    = [1];              // CCP1 (PB22)
-PWM1.clockPrescale              = 80;
-PWM1.timerCount                 = 5000;             // 1 kHz @ 80 MHz
-PWM1.timerStartTimer            = true;
-PWM1.peripheral.$assign         = "TIMG8";          // ⬅ 关键：PB22 用 TIMG8
-PWM1.peripheral.ccp1Pin.$assign = "PB22";           // ⬅ CCP1 非 CCP0
+PWM1.$name                      = "PWM_0";
+PWM1.peripheral.$assign         = "TIMG8";
+PWM1.peripheral.ccp1Pin.$assign = "PB22";
 PWM1.PWM_CHANNEL_1.dutyCycle    = 50;
 ```
 
-> **Board 模块必须无参调用**：`scripting.addModule("/ti/driverlib/Board")`（不要加 `{}, false`），否则 PB22 等 Upper 段引脚不会出现在 PWM 引脚选择列表中。scaffold.py 已自动修正此问题。
+使用前重新生成并检查：
 
-## PWM Config Pattern (edge-aligned, 1 kHz on free pin)
+- `PWM_0_INST`
+- `GPIO_PWM_0_C1_IDX`
+- Timer 功能时钟、period 和 compare 范围
 
-```
-PWM instance: TIMG0
-Pin: PA3 (or any free pin)
-Prescale: 80 (80 MHz / 80 = 1 MHz)
-Period: 1000 (1 kHz)
-Duty: 50%
-```
+不要把这段局部配置当作独立、可直接生成的完整 `.syscfg`。
 
-## Generated Macros (example)
+## Runtime
 
-```
-PWM_0_INST          → TIMG0
-PWM_0_INST_CLK_FREQ → 1000000
-GPIO_PWM_0_C0_IDX   → DL_TIMER_CC_0_INDEX
-```
-
-## IMPORTANT: PWM vs TIMER Module
-
-SysConfig has TWO different modules for timer peripherals. Do NOT confuse them:
-
-| `/ti/driverlib/PWM` | `/ti/driverlib/TIMER` |
-|---------------------|----------------------|
-| For PWM output (breathing LED, servo, motor control) | For periodic interrupts (tick, timeout) → [timer.md](timer.md) |
-| No `timerMode` — PWM mode is implicit | `timerMode`: `ONE_SHOT / PERIODIC / ...` (NO `EDGE_ALIGN_PWM`) |
-| `clockPrescale` (one value) | `timerClkDiv` + `timerClkPrescale` (two values) |
-| `timerCount` (pure number) | `timerPeriod` (string, e.g. `"5 ms"`) |
-| Channels: `PWM_CHANNEL_0.dutyCycle` | No PWM channels |
-
-## SysConfig JS Snippet (PWM output, 1 kHz, 50% duty)
-
-```js
-const PWM  = scripting.addModule("/ti/driverlib/PWM", {}, false);
-const PWM1 = PWM.addInstance();
-
-PWM1.$name                      = "PWM_0";
-PWM1.pwmMode                    = "EDGE_ALIGN_UP";
-PWM1.ccIndex                    = [0];
-PWM1.clockPrescale              = 80;       // 80 MHz / 80 = 1 MHz
-PWM1.timerCount                 = 1000;     // 1 MHz / 1000 = 1 kHz
-PWM1.timerStartTimer            = true;
-PWM1.peripheral.$assign         = "TIMG0";
-PWM1.peripheral.ccp0Pin.$assign = "PA3";
-PWM1.PWM_CHANNEL_0.dutyCycle    = 50;
-```
-
-## SysConfig Naming Rules
-
-- All `$name` values must be **globally unique** across all instances and pins.
-- Pin names within an instance are automatically prefixed: `GPIO_<instance>$name`_`<pin>$name`_PIN`
-  - Example: instance `$name = "LEDS"`, pin `$name = "LED"` → `LEDS_LED_PIN`
-- Avoid pin names that match their instance name (e.g. instance `$name = "LED"` with pin `$name = "LED"` causes `$name` collision).
-
-## CRITICAL: Timer/PWM Must Be Started Manually
-
-`SYSCFG_DL_init()` 不会自动启动定时器。**必须在 init 后显式调用 startCounter**：
+初始化后显式启动计数器：
 
 ```c
 SYSCFG_DL_init();
-DL_TimerG_startCounter(PWM_0_INST);   // PWM 定时器
-```
-
-## Output Polarity — CRITICAL
-
-**EDGE_ALIGN_UP + INIT_VAL_LOW + INV_OUT_DISABLED** 的输出规则：
-
-| 阶段 | 输出 |
-|------|------|
-| counter < CC | LOW |
-| counter ≥ CC | HIGH |
-
-高电平占比 = `(PERIOD - CC) / PERIOD`：
-
-| CC 值 | 高电平占比 | LED 亮度（active-high） |
-|-------|-----------|----------------------|
-| 0 | ~100% | **全亮** |
-| PERIOD/2 | 50% | 半亮 |
-| PERIOD-1 | ~0% | **全灭**（注意：CC=PERIOD 会回绕到全亮！） |
-| PERIOD | 100% | ⚠️ 全亮（回绕，需钳制上限到 PERIOD-1） |
-
-> **与 STM32 TIM ARR/CCR 方向相反**：STM32 CC 越大越亮，MSPM0 EDGE_ALIGN_UP 是 CC 越小越亮。
-
-**呼吸灯正确写法**（duty 增加 = 亮度增加）：
-
-```c
-#define PWM_PERIOD 5000u
-
-/* CC 取反使亮度随 duty 增加 */
-DL_TimerG_setCaptureCompareValue(PWM_0_INST, PWM_PERIOD - duty, DL_TIMER_CC_1_INDEX);
-```
-
-## Key APIs
-
-```c
-DL_TimerG_setCaptureCompareValue(PWM_0_INST, duty, DL_TIMER_CC_0_INDEX);
 DL_TimerG_startCounter(PWM_0_INST);
 ```
 
-## Common Pitfalls
-
-### P1: Unsigned int underflow in breathing loops
-
-**Bug**: `unsigned int` 递减循环 `for (unsigned i = 999; i >= 1; i -= 5)` 在 `i = 4` 执行后 `4 - 5 = 0xFFFFFFFF`（无符号回绕），`0xFFFFFFFF >= 1` 永远为真 → **死循环**，LED 停在某个固定亮度。
-
-**Fix**: 循环变量用 `int`，传入 API 时显式转换：
+对当前 EDGE_ALIGN_UP 配置，高电平占比取决于生成模式和 compare 方向。使用模板时将 compare 限制在 `1..period-1`，并在示波器或 LED 上确认极性；不要把其他 MCU 的 ARR/CCR 经验直接迁移。
 
 ```c
-for (int duty = PWM_MAX; duty >= PWM_MIN; duty -= FADE_STEP) {
-    DL_TimerG_setCaptureCompareValue(
-        PWM_0_INST, (unsigned int)duty, GPIO_PWM_0_C1_IDX);
-    delay_cycles(FADE_DELAY);
-}
+DL_TimerG_setCaptureCompareValue(
+    PWM_0_INST,
+    compare,
+    GPIO_PWM_0_C1_IDX);
 ```
 
-### P2: `DL_TimerG_startCounter()` is mandatory
+呼吸循环使用有符号变量或显式边界，避免无符号递减回绕。PWM ISR 如存在，也必须遵循短 ISR 规则。
 
-`SYSCFG_DL_init()` 配置引脚和时钟后，**定时器计数器不会自动启动**。忘记调用 `startCounter` 会导致 PWM 引脚完全无波形输出（LED 不亮）。参见上文 [CRITICAL: Timer/PWM Must Be Started Manually](#critical-timerpwm-must-be-started-manually)。
+## Resource conflicts
 
-### P3: EDGE_ALIGN_UP polarity is opposite to STM32 / common tutorials
+- TIMG8 用于 QEI 时，PB22 不能继续作为 TIMG8 PWM。
+- PB26 属于 TIMG6 CCP0，因此不会仅因 TIMG8 QEI 而发生实例冲突；仍须检查当前工程中的 TIMG6 和引脚占用。
+- PB6～PB9 连接板载 SPI Flash，不能作为任意 PWM 默认候选。
 
-| 平台 | 常见行为 | MSPM0 EDGE_ALIGN_UP |
-|------|---------|-------------------|
-| STM32 TIM | CCR↑ = 占空比↑ = 更亮 | 不适用 |
-| MSPM0 EDGE_ALIGN_UP | — | **CC↓ = 高电平占比↑ = 更亮** |
+## Primary source
 
-SysConfig PWM 模块默认模式为 **EDGE_ALIGN_UP**。部分在线教程（如某些 wiki）描述的是 EDGE_ALIGN_DOWN 行为（CC↑=亮），直接照搬会导致呼吸方向反转。详见上文 [Output Polarity](#output-polarity--critical)。
+[TI MSPM0G3507 datasheet, pin attributes and TIMx configurations](https://www.ti.com/lit/ds/symlink/mspm0g3507.pdf)。

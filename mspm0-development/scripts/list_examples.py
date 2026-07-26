@@ -38,6 +38,28 @@ def clock_text(manifest: dict[str, Any]) -> str:
     return as_text(cpu)
 
 
+def validation_text(manifest: dict[str, Any]) -> tuple[str, str]:
+    validation = manifest.get("validation")
+    if not isinstance(validation, dict):
+        return "", ""
+    highest = as_text(validation.get("highest_level"))
+    levels = validation.get("levels")
+    if not isinstance(levels, dict):
+        return highest, ""
+    abbreviations = (
+        ("S", "static"),
+        ("G", "sysconfig_generation"),
+        ("C", "compile_link"),
+        ("F", "flash"),
+        ("R", "serial"),
+        ("P", "physical_behavior"),
+    )
+    summary = ",".join(
+        f"{label}={as_text(levels.get(key))}" for label, key in abbreviations
+    )
+    return highest, summary
+
+
 def list_contains(value: Any, expected: str) -> bool:
     if not isinstance(value, list):
         return False
@@ -132,13 +154,14 @@ def main() -> int:
         "clock",
         "pins",
         "peripherals",
-        "validated",
-        "level",
-        "physical",
+        "lifecycle",
+        "highest",
+        "levels",
         "path",
     )
     rows = []
     for manifest in manifests:
+        highest, levels = validation_text(manifest)
         rows.append(
             (
                 as_text(manifest.get("board")),
@@ -147,9 +170,9 @@ def main() -> int:
                 clock_text(manifest),
                 as_text(manifest.get("pins")),
                 as_text(manifest.get("peripherals")),
-                as_text(manifest.get("validated")),
-                as_text(manifest.get("validation_level")),
-                as_text(manifest.get("physical_behavior_revalidated")),
+                as_text(manifest.get("lifecycle")),
+                highest,
+                levels,
                 as_text(manifest.get("_relative_path")),
             )
         )

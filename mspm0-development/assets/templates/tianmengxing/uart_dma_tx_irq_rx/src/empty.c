@@ -2,13 +2,12 @@
 #include "ti_msp_dl_config.h"
 
 static UART_Context *uart0;
-static UART_Context *uart1;
 
-static void UART_RxCompleteCallback(UART_Context *uart)
+static void UART_ProcessFrame(UART_Context *uart)
 {
     uint8_t sent;
 
-    if (uart == 0) {
+    if ((uart == 0) || (!uart->frameReady)) {
         return;
     }
 
@@ -16,20 +15,26 @@ static void UART_RxCompleteCallback(UART_Context *uart)
     sent = UART_tryPrintfDMA(uart->inst, "%s | %.2f,%.2f,%.2f\n",
         uart->rxBuf,
         uart->floatBuf[0], uart->floatBuf[1], uart->floatBuf[2]);
-    (void) sent;
-
-    UART_clearNewFrame(uart->inst);
-    // Keep PC-to-MCU send rate modest; this example targets low-rate parameter debugging.
+    if (sent) {
+        UART_clearNewFrame(uart->inst);
+    }
 }
 
 int main(void)
 {
     SYSCFG_DL_init();
-    uart0 = UART_init(UART_0_INST, UART_RX_MODE_ISR_CALLBACK, UART_RxCompleteCallback);
-    uart1 = UART_init(UART_1_INST, UART_RX_MODE_POLL, UART_RxCompleteCallback);
+    uart0 = UART_init(UART_0_INST, UART_RX_MODE_IRQ_DEFERRED, UART_ProcessFrame);
+    if (uart0 == 0) {
+        while (1) {
+        }
+    }
 
     while (1) {
-        UART_poll(UART_1_INST);
+        /*
+         * IRQ 只收字节并置 frameReady；浮点解析、格式化和 DMA 启动均在前台执行。
+         * DMA 忙时保留当前帧，下一轮主循环继续尝试。
+         */
+        UART_poll(UART_0_INST);
     }
 }
 
@@ -41,20 +46,6 @@ void UART0_IRQHandler(void)
             break;
         case DL_UART_IIDX_RX:
             UART_RxIRQHandler(UART_0_INST);
-            break;
-        default:
-            break;
-    }
-}
-
-void UART1_IRQHandler(void)
-{
-    switch (DL_UART_getPendingInterrupt(UART_1_INST)) {
-        case DL_UART_IIDX_DMA_DONE_TX:
-            UART_DMADoneTxCallback(UART_1_INST);
-            break;
-        case DL_UART_IIDX_RX:
-            UART_RxIRQHandler(UART_1_INST);
             break;
         default:
             break;

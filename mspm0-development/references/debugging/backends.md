@@ -6,7 +6,7 @@ Use this reference when the user asks the agent to flash or debug a connected MS
 
 ## Contents
 
-- Read-only probe detection and backend selection
+- Read-only OS probe detection and backend selection
 - CCS DSS/UniFlash operations
 - OpenOCD/GDB operations
 - Failure containment and recovery boundaries
@@ -15,12 +15,14 @@ Before selecting a backend for an unspecified probe, run:
 
 ```powershell
 python scripts\detect_probe.py
-python scripts\check_syscfg.py <project-dir> --probe
+python scripts\check_syscfg.py <project-dir> --detect-probe
 ```
 
-Probe detection is read-only. Do not flash when multiple probes are connected, detection is unknown, or the physical probe conflicts with project configuration until the user confirms the intended backend.
+These two commands only inspect OS PnP/USB evidence; they do not connect to or halt the MCU. Do not flash when multiple probes are connected, detection is unknown, or the physical probe conflicts with project configuration until the user confirms the intended backend.
 
-Zero detected probes is an inconclusive result. Before saying that no probe is connected, inspect OS USB/PnP and serial devices and try the intended backend's read-only probe/list operation. This matters for composite DAPLink/CMSIS-DAP and XDS110 devices whose debug interface and virtual COM port may appear under different Windows device classes.
+Zero detected probes is an inconclusive result. Before saying that no probe is connected, inspect OS USB/PnP and serial devices. This matters for composite DAPLink/CMSIS-DAP and XDS110 devices whose debug interface and virtual COM port may appear under different Windows device classes.
+
+`inspect-target` has different safety semantics: it attaches a debug backend and may briefly halt the CPU. It requires explicit device-action intent and must not be described as read-only probe detection.
 
 ## CCS Debug MCP Backend
 
@@ -59,20 +61,14 @@ CCS Debug Server Scripting is abbreviated as `ccs-dss` in this skill. Use it for
 From this skill package:
 
 ```powershell
-python scripts\ccs_dss_debug.py <project-dir> probe --leave-running
-```
-
-When running from the repository root:
-
-```powershell
-python skills\mspm0-ccs\scripts\ccs_dss_debug.py <project-dir> probe --leave-running
+python scripts\ccs_dss_debug.py <project-dir> inspect-target --leave-running
 ```
 
 Common commands:
 
 ```powershell
 # Connect, read reset types and registers, then continue the target before disconnecting.
-python scripts\ccs_dss_debug.py <project-dir> probe --leave-running
+python scripts\ccs_dss_debug.py <project-dir> inspect-target --leave-running
 
 # Program the current Debug/Release .out and use System Reset after loading.
 python scripts\ccs_dss_debug.py <project-dir> load --reset "System Reset" --leave-running
@@ -109,11 +105,20 @@ Useful options:
 - `--symbols`: load debug symbols from `.out` without programming flash for commands that support it.
 - `--leave-running`: remove breakpoints and continue target execution before disconnecting, where supported by the chosen command.
 
+The helper resolves `run.bat` in this order: explicit `--ccs-run`, `CCS_DSS_RUN` /
+`CCS_SCRIPTING_RUN`, CCS root environment variables, the active project's generated
+build rules, then common TI install roots. A build-rule path such as
+`<install>/ccs/utils/sysconfig_*/sysconfig_cli.bat` is used only to derive the sibling
+`<install>/ccs/scripting/run.bat`; it does not execute commands copied from project
+metadata. Pass `--ccs-run` when the installation uses another layout.
+
 When a project contains multiple `.ccxml` files or a command that needs a program finds multiple `.out` files, pass `--ccxml` or `--out` explicitly. The helper refuses to guess because selecting an old build or a target configuration for the wrong probe can produce misleading results or program unintended firmware.
 
-## Verified Notes
+## Historical backend observations
 
-Validated on LCKFB Tianmengxing MSPM0G3507 + CCS / CCS Theia + J-Link with a CCS project containing `targetConfigs/MSPM0G3507.ccxml` and `Debug/<project>.out`.
+The following operations were reported from an earlier Tianmengxing + J-Link session, but the retained note has no date, board revision, exact tool versions, command log, or firmware hash. Treat it as troubleshooting context, not current release evidence or permission to connect to hardware.
+
+The reported environment used LCKFB Tianmengxing MSPM0G3507 + CCS / CCS Theia + J-Link with a CCS project containing `targetConfigs/MSPM0G3507.ccxml` and `Debug/<project>.out`.
 
 Observed working operations:
 
@@ -147,7 +152,9 @@ Stop and ask the user before continuing if:
 
 Use this backend when the detected probe and interface configuration are compatible with an MSPM0-capable OpenOCD installation.
 
-### Verified Scope
+### Historical tested scope
+
+This scope is inherited from an unversioned observation without a retained date, command log, board revision, or firmware hash. Revalidate the current toolchain and hardware before claiming a validation level above static inspection.
 
 The packaged helper was verified with:
 
@@ -165,7 +172,7 @@ OpenOCD MSPM0 support commonly requires a TI MSPM0-capable build or TI extension
 ### Commands
 
 ```powershell
-python scripts\openocd_debug.py <project-dir> probe
+python scripts\openocd_debug.py <project-dir> inspect-target
 python scripts\openocd_debug.py <project-dir> flash
 python scripts\openocd_debug.py <project-dir> registers
 python scripts\openocd_debug.py <project-dir> run-to-symbol --symbol main
@@ -189,7 +196,7 @@ target/ti/mspm0.cfg or target/ti_mspm0.cfg, auto-detected from the OpenOCD insta
 Override them only when the connected probe, target support package, or project requires a different choice:
 
 ```powershell
-python scripts\openocd_debug.py <project-dir> --interface <interface.cfg> --target <target.cfg> --speeds 24000,1000,500 probe
+python scripts\openocd_debug.py <project-dir> --interface <interface.cfg> --target <target.cfg> --speeds 24000,1000,500 inspect-target
 ```
 
 ### Flash Behavior
@@ -226,7 +233,7 @@ If it reports `target_locked_or_protected`, stop retries and ask the user to run
 
 ### OpenOCD Debug Safety
 
-`probe` and `registers` briefly halt the current CPU state without resetting the target, then restore execution before the one-shot OpenOCD server exits. `run-to-symbol` intentionally resets and runs to the requested breakpoint. Before using debug actions on motors, power electronics, or other real-time control systems:
+`inspect-target` and `registers` briefly halt the current CPU state without resetting the target, then restore execution before the one-shot OpenOCD server exits. The deprecated `probe` alias has the same effect and exists only for command compatibility. `run-to-symbol` intentionally resets and runs to the requested breakpoint. Before using debug actions on motors, power electronics, or other real-time control systems:
 
 1. Warn the user that debug actions may pause control loops.
 2. Put actuators into a safe state when possible.

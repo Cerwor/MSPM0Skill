@@ -1,8 +1,7 @@
 /**
- * Example SysConfig file for the LCKFB Tianmengxing MSPM0G3507 PB22 PWM breathing LED.
- * The source pattern has prior hardware evidence. This configuration was
- * regenerated with MSPM0 SDK 2.10.00.04 and SysConfig 1.27.0; physical
- * behavior has not been revalidated after the metadata migration.
+ * 嘉立创天猛星 MSPM0G3507 板载 PB22 PWM 呼吸灯 SysConfig 示例。
+ * 元数据基线为 MSPM0 SDK 2.10.00.04 和 SysConfig 1.27.0；
+ * 当前发布证据以同目录 schema 2 manifest.json 为准。
  *
  * @cliArgs --device "MSPM0G350X" --part "Default" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
  * @v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"

@@ -1,16 +1,38 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "led_blink",
+  "lifecycle": "reference",
   "title": "Tianmengxing PB22 LED Blink",
   "description": "Configurable-frequency active-high PB22 GPIO blink reference for the LCKFB Tianmengxing MSPM0G3507 onboard LED.",
   "board": "LCKFB Tianmengxing MSPM0G3507",
   "device": "MSPM0G3507",
   "package": "LQFP-64(PM)",
+  "product": "mspm0_sdk@2.10.00.04",
   "sdk": "MSPM0 SDK 2.10.00.04",
   "sysconfig": "1.27.0",
-  "validated": true,
-  "validation_level": "sysconfig_build",
-  "physical_behavior_revalidated": false,
+  "content_sha256": "9caa69f1f63a1a44601393dd6f3df5c187845aaa90b2e9c71fb38d1a0a59b0bd",
+  "validation": {
+    "highest_level": "static",
+    "levels": {
+      "static": "passed",
+      "sysconfig_generation": "not_run",
+      "compile_link": "not_run",
+      "flash": "not_run",
+      "serial": "not_run",
+      "physical_behavior": "not_run"
+    },
+    "records": [
+      {
+        "level": "static",
+        "status": "passed",
+        "checked_at": "2026-07-26",
+        "board_revision": "not-observed",
+        "command": "python -B scripts/validate_skill.py .",
+        "artifact_sha256": "9caa69f1f63a1a44601393dd6f3df5c187845aaa90b2e9c71fb38d1a0a59b0bd",
+        "result": "仅静态包检查；未做 SysConfig 生成、编译/链接、烧录、串口测试或实物行为验证。"
+      }
+    ]
+  },
   "complexity": "basic",
   "clock": {
     "cpuclk_hz": 32000000,

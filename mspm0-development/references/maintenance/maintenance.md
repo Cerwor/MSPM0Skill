@@ -29,7 +29,7 @@ Do not add a second exhaustive routing table, duplicate public board scripts, ge
 2. Keep `SKILL.md` concise and route to details progressively.
 3. Parameterize scripts; never embed a maintainer machine path.
 4. Preserve board distinctions, validation levels, and upstream license notices.
-5. Give every template a UTF-8 `manifest.json` with board, device, package, source list, and validation status.
+5. Give every template a UTF-8 schema-2 `manifest.json` with board, device, package, source list, `content_sha256`, lifecycle, and six-level validation evidence.
 6. When a canonical template changes a represented field, review the concise SysConfig pattern view in the same change.
 7. Run local validation:
 
@@ -43,7 +43,9 @@ Do not add a second exhaustive routing table, duplicate public board scripts, ge
 
 ## Validation levels
 
-Report levels independently: static inspection, SysConfig generation, compilation/link, probe detection, flash, serial evidence, and physical behavior. A lower level never implies a higher level.
+Report exactly these levels independently: `static`, `sysconfig_generation`, `compile_link`, `flash`, `serial`, and `physical_behavior`. OS-level probe detection is a diagnostic prerequisite, not a firmware validation level. A lower level never implies a higher level.
+
+Each passed level needs a dated record with a concrete result and appropriate evidence. Static evidence binds to `content_sha256`, calculated from sorted relative paths plus strict UTF-8 template text with line endings normalized to LF so Git checkout policy does not invalidate the record. Higher levels should retain exact tool versions and commands, while device-facing levels should additionally retain the board revision, firmware hash, and a log or observation reference. Never reconstruct missing historical evidence.
 
 ## Packaging rules
 

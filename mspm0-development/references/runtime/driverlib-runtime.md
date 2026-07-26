@@ -42,6 +42,8 @@ Interrupt handlers should:
 
 Avoid long delays, blocking serial I/O, complex parsing, slow bus transactions, and heavy control logic inside ISRs.
 
+UART RX 中断只完成有界的数据搬运：读取一个或少量 FIFO 字节、写入预分配缓冲区或环形队列、更新索引，并在遇到帧结束条件时置 `frame_ready`。ISR 中不要调用浮点解析、`sscanf`、`strtof`、`snprintf`/`vsnprintf`，也不要启动 DMA 发送。主循环或任务取得完整帧后再解析和格式化，并在确认 DMA 空闲后启动发送。
+
 For a SysConfig periodic TIMER interrupt:
 
 - set `timerPeriod`, `timerMode = "PERIODIC"`, `interrupts = ["ZERO"]`, and the selected timer peripheral in `.syscfg`
@@ -61,22 +63,7 @@ If a project includes `FreeRTOSConfig.h`, `FreeRTOS.h`, `task.h`, `xTaskCreate`,
 
 ## Clock And Delay Rules
 
-For the verified Tianmengxing MSPM0G3507 80 MHz pattern:
-
-- HFXT: 40 MHz on PA5 / PA6
-- SYSPLL: enabled
-- CPUCLK: 80 MHz
-- ULPCLK divider: 2
-- MFCLK: 4 MHz from SYSOSC_4M, useful for UART examples
-
-`delay_cycles(n)` depends on CPUCLK:
-
-- 32 MHz: `delay_cycles(32000000)` is roughly 1 s
-- 80 MHz: `delay_cycles(80000000)` is roughly 1 s
-
-Use timers for real timing and control loops. Treat `delay_cycles()` as a smoke-test convenience.
-
-If `delay_cycles(80000000)` gives about 2.5 s, the program is likely running near 32 MHz. After flash, issue a System Reset or press the board reset button.
+天猛星晶振、引脚和板级时钟约束由 [tianmengxing.md](../hardware/tianmengxing.md) 负责；可复用的 SysConfig 时钟配置由 [sysconfig-patterns.md](sysconfig-patterns.md) 负责。本运行时文档只规定：延时计算读取当前生成的 `CPUCLK_FREQ`，时钟变化后重新生成并检查宏；真实定时和控制循环使用 Timer 或工程既有时间基准，`delay_cycles()` 仅用于短小冒烟测试。
 
 ## Common Mistakes
 
@@ -88,7 +75,7 @@ If `delay_cycles(80000000)` gives about 2.5 s, the program is likely running nea
 - Reinitializing by hand a peripheral already owned by SysConfig.
 - Reporting SysConfig warnings as clean success.
 - Rewriting unrelated user code or copyright headers.
-- Blindly copying `SYSCTL.peripheral.$suggestSolution` into an HFXT clock-tree configuration. If SysConfig reports that `SYSCTL.peripheral` is undefined, remove that copied line; HFXT pinmux suggestions belong to the HFXT clock-tree object.
+- 从旧工程盲拷时钟树属性，而不是按 [sysconfig-patterns.md](sysconfig-patterns.md) 和匹配 SDK 示例重新求解。
 
 ## External Modules
 

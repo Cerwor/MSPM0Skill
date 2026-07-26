@@ -393,7 +393,11 @@ python -B scripts\list_examples.py --board Tianmengxing --peripheral UART
 | 天猛星 | `uart_dma_tx_irq_rx` |
 | 天巧星 | `blink` |
 
-列表会分别显示当前验证层级和是否完成物理行为复验。模板只是起始证据，不是所有工程都能直接复制的固定布局；引脚、时钟、SDK、编译器和探针仍应以当前项目为准。
+模板使用 schema 2 六级证据模型：`static`、`sysconfig_generation`、`compile_link`、`flash`、`serial`、`physical_behavior`。`validation.highest_level` 只表示有记录支持的最高层级，`validation.levels` 会逐级显示状态，`validation.records` 保存 `checked_at`、`board_revision`、`command`、`artifact_sha256` 和 `result`；不再使用容易夸大成熟度的验证布尔值。
+
+当前 7 个模板的最高证据均仅为 `static`，其余五级均为 `not_run`。模板中的 SDK 2.10 信息只是来源和配置基线，不表示本次已经重新生成或编译；MSPM0 SDK 2.11 兼容性尚未验证。模板只是起始证据，不是所有工程都能直接复制的固定布局；引脚、时钟、SDK、编译器和探针仍应以当前项目为准。
+
+天猛星的 ADC、通用/外接 SPI、I2C、QEI 目前只有维护参考，没有规范模板。它们需要先确定目标信号、核对当前板版原理图，再用匹配版本 SysConfig 生成并编译；本仓库不会为补齐数量而加入猜测引脚的静态配置。天巧星按既定边界只保留通用外设参考和最小 blink 模板。
 
 需要快速查看局部 `.syscfg` 写法时，读取 [SysConfig 局部模式](mspm0-development/references/runtime/sysconfig-patterns.md)，再打开对应完整模板和 `manifest.json`。局部模式不是可独立生成的完整配置。
 
@@ -414,7 +418,7 @@ python -B scripts\list_examples.py --board Tianmengxing --peripheral UART
 - 使用连续计数与模差处理回绕，不采用读后重置计数器的旧模式。
 - 半模数差值方向不可判定，必须报告采样过稀。
 - 不固定 5 ms 采样周期，也不固定除以 4；PPR、CPR、相序和方向需要依据手册及实测。
-- 天猛星常见的 TIMG8、PA29/PA30 只能作为器件复用候选；TIMG8 QEI 与 PB22/PB26 的 TIMG8 PWM 用途互斥。
+- 天猛星常见的 TIMG8、PA29/PA30 只能作为器件复用候选；TIMG8 QEI 与 PB22 等 TIMG8 PWM 用途互斥。PB26 是 TIMG6 CCP0，不属于该 TIMG8 冲突。
 
 skill 不包含 QEI 应用模板，也不会恢复旧天巧星编码器按键、显示或蜂鸣器逻辑。
 
@@ -423,9 +427,12 @@ skill 不包含 QEI 应用模板，也不会恢复旧天巧星编码器按键、
 在 `mspm0-development` 目录运行：
 
 ```powershell
+python -B -m unittest discover -s ..\tests -v
 python -B scripts\validate_skill.py .
 python -B scripts\list_examples.py
 ```
+
+其中单元测试覆盖捕获器的 schema 2 端到端契约、负向校验规则，以及使用 DriverLib 桩编译真实 `UART.c` 的主机端接收/DMA 状态机；它不连接开发板。
 
 如果本机有系统 `skill-creator`，还应运行其 `quick_validate.py`：
 
@@ -440,15 +447,9 @@ $quickValidate = Join-Path $codexDirectory (
 python -B $quickValidate .
 ```
 
-最近一次发布验证记录：2026-07-26，skill 内容对应提交 [`21dad86`](https://github.com/Cerwor/MSPM0Skill/commit/21dad869d14ce81ecc8c977dda32eec680be54b2)。
+当前 schema 2 manifest 只记录 2026-07-26 的静态检查。此前缺少可复核的板卡版本、命令、日志和模板内容摘要的生成、编译或实物经历，不迁移为当前模板的通过证据。
 
-- 仓库源和安装副本结构校验。
-- 11 个公共脚本的 `--help` 检查。
-- SysConfig 1.27.0 + MSPM0 SDK 2.10.00.04：7 个模板严格生成，0 warnings。
-- 同版本 TI 官方 G3507 `timg_qei_mode` 严格生成，0 warnings。
-- TI Arm Clang 4.0.4.LTS：模板应用源码与 SysConfig 生成配置共 15 个 C 编译单元，以 `-Wall -Wextra -Werror -fsyntax-only` 检查通过。
-
-这些结果不等于所有板卡和外设已经完成实物验证。烧录成功也不能单独证明时序、极性、方向、每圈计数或电气连接正确。
+后续每次提升模板层级时，都应对 manifest 所绑定的内容摘要保存对应记录。SysConfig 生成不等于编译成功，编译成功不等于烧录或串口通过，烧录成功也不能单独证明时序、极性、方向、每圈计数或电气连接正确。MSPM0 SDK 2.11 当前仍未进入兼容性验证矩阵。
 
 ## 安全边界
 

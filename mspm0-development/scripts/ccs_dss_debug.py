@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,21 @@ from pathlib import Path
 DEFAULT_RUN_BAT_CANDIDATES = (
     r"C:\ti\ccs2020\ccs\scripting\run.bat",
     r"C:\ti\uniflash_9.2.0\deskdb\content\TICloudAgent\win\scripting\run.bat",
+)
+RUN_BAT_ENV_VARS = (
+    "CCS_DSS_RUN",
+    "CCS_SCRIPTING_RUN",
+)
+CCS_ROOT_ENV_VARS = (
+    "CCS_ROOT",
+    "CCS_HOME",
+    "CCS_INSTALL_DIR",
+)
+PROJECT_BUILD_FILES = (
+    Path("Debug/subdir_rules.mk"),
+    Path("Release/subdir_rules.mk"),
+    Path("Debug/makefile"),
+    Path("Release/makefile"),
 )
 
 
@@ -38,28 +54,75 @@ def find_first(paths: list[Path], what: str) -> Path:
     return existing[0]
 
 
-def find_run_bat(explicit: str | None) -> Path:
+def deduplicate_paths(paths: list[Path]) -> list[Path]:
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = os.path.normcase(str(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
+
+
+def run_bat_candidates_from_ccs_root(value: str | Path) -> list[Path]:
+    root = Path(os.path.expandvars(os.path.expanduser(str(value))))
+    return [
+        root / "scripting" / "run.bat",
+        root / "ccs" / "scripting" / "run.bat",
+    ]
+
+
+def project_run_bat_candidates(project_dir: Path) -> list[Path]:
+    candidates: list[Path] = []
+    ccs_root_pattern = re.compile(
+        r'(?i)([A-Za-z]:[\\/][^"\r\n]*?[\\/]ccs)[\\/](?:utils|tools|ccs_base|scripting)[\\/]'
+    )
+    for relative_path in PROJECT_BUILD_FILES:
+        build_file = project_dir / relative_path
+        if not build_file.is_file():
+            continue
+        text = build_file.read_text(encoding="utf-8", errors="replace")
+        for match in ccs_root_pattern.finditer(text):
+            ccs_root = Path(match.group(1).replace("/", "\\"))
+            candidates.append(ccs_root / "scripting" / "run.bat")
+    return deduplicate_paths(candidates)
+
+
+def find_run_bat(explicit: str | None, project_dir: Path | None = None) -> Path:
     if explicit:
         return find_first([Path(explicit)], "CCS scripting run.bat")
 
-    env_candidates = [
-        os.environ.get("CCS_DSS_RUN"),
-        os.environ.get("CCS_SCRIPTING_RUN"),
-    ]
+    env_candidates = [os.environ.get(variable) for variable in RUN_BAT_ENV_VARS]
     candidates = [Path(p) for p in env_candidates if p]
+    for variable in CCS_ROOT_ENV_VARS:
+        value = os.environ.get(variable)
+        if value:
+            candidates.extend(run_bat_candidates_from_ccs_root(value))
+    if project_dir is not None:
+        candidates.extend(project_run_bat_candidates(project_dir))
     candidates.extend(Path(p) for p in DEFAULT_RUN_BAT_CANDIDATES)
 
-    ti_root = Path(r"C:\ti")
-    if ti_root.exists():
-        candidates.extend(sorted(ti_root.glob("ccs*/ccs/scripting/run.bat"), reverse=True))
-        candidates.extend(
-            sorted(
-                ti_root.glob("uniflash*/deskdb/content/TICloudAgent/win/scripting/run.bat"),
-                reverse=True,
-            )
+    if os.name == "nt":
+        ti_roots = deduplicate_paths(
+            [
+                Path(os.environ.get("TI_ROOT", r"C:\ti")),
+                Path(r"C:\ti"),
+            ]
         )
+        for ti_root in ti_roots:
+            if not ti_root.exists():
+                continue
+            candidates.extend(sorted(ti_root.glob("ccs*/ccs/scripting/run.bat"), reverse=True))
+            candidates.extend(
+                sorted(
+                    ti_root.glob("uniflash*/deskdb/content/TICloudAgent/win/scripting/run.bat"),
+                    reverse=True,
+                )
+            )
 
-    return find_first(candidates, "CCS scripting run.bat")
+    return find_first(deduplicate_paths(candidates), "CCS scripting run.bat")
 
 
 def find_ccxml(project_dir: Path, explicit: str | None) -> Path:
@@ -450,8 +513,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    probe = subparsers.add_parser("probe", help="Connect, list reset types, read registers, then halt")
-    probe.add_argument("--leave-running", action="store_true", help="Continue target before disconnecting")
+    inspect_target = subparsers.add_parser(
+        "inspect-target",
+        help="Connect, halt, list reset types and registers; optionally resume before disconnecting",
+    )
+    inspect_target.add_argument("--leave-running", action="store_true", help="Continue target before disconnecting")
+
+    legacy_probe = subparsers.add_parser(
+        "probe",
+        help="Deprecated alias for inspect-target; this connects to and halts the CPU",
+    )
+    legacy_probe.add_argument("--leave-running", action="store_true", help="Continue target before disconnecting")
 
     load = subparsers.add_parser("load", help="Load/program the .out through the debug session")
     load.add_argument("--reset", default=None, help='Optional reset type, for example "System Reset"')
@@ -494,6 +566,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
+    if args.command == "probe":
+        print(
+            "warning: 'probe' 已弃用；该操作会连接并暂停 CPU，请改用 'inspect-target'。",
+            file=sys.stderr,
+        )
+
     if args.command in {"run-to-symbol", "break-line"} and args.load and args.symbols:
         parser.error("--load and --symbols are mutually exclusive")
 
@@ -501,7 +579,7 @@ def main(argv: list[str] | None = None) -> int:
     if not project_dir.exists():
         raise SystemExit(f"error: project directory does not exist: {project_dir}")
 
-    run_bat = find_run_bat(args.ccs_run)
+    run_bat = find_run_bat(args.ccs_run, project_dir)
     ccxml = find_ccxml(project_dir, args.ccxml)
 
     program_required = args.command in {"load", "load-symbols"} or (
@@ -516,7 +594,7 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
 
-    if args.command == "probe":
+    if args.command in {"inspect-target", "probe"}:
         js_text = make_probe_js(args.timeout_ms, ccxml, args.leave_running)
     elif args.command == "load":
         js_text = make_load_js(args.timeout_ms, ccxml, program, args.reset, args.leave_running)

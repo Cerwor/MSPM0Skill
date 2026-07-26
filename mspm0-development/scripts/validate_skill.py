@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import runpy
+import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -66,6 +68,27 @@ TIANQIAOXING_COMMON_REFERENCES = {
 }
 TIANMENGXING_COMMON_REFERENCES = TIANQIAOXING_COMMON_REFERENCES.copy()
 TIANQIAOXING_TEMPLATES = {"blink"}
+VALIDATION_LEVELS = (
+    "static",
+    "sysconfig_generation",
+    "compile_link",
+    "flash",
+    "serial",
+    "physical_behavior",
+)
+VALIDATION_HIGHEST_LEVELS = ("unverified", *VALIDATION_LEVELS)
+VALIDATION_STATUSES = {"passed", "failed", "not_run"}
+LEGACY_VALIDATION_KEYS = {
+    "validated",
+    "validation_level",
+    "prior_validation_level",
+    "physical_behavior_revalidated",
+}
+CONTENT_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+FENCED_CODE_RE = re.compile(r"```[^\r\n]*\r?\n(.*?)```", re.DOTALL)
+PYTHON_COMMAND_RE = re.compile(
+    r'(?im)^[ \t]*(?:python|py)(?:\.exe)?(?:[ \t]+-B)?[ \t]+(?:"([^"]+)"|\'([^\']+)\'|([^\s`]+))'
+)
 
 
 @dataclass
@@ -168,6 +191,50 @@ def check_markdown(root: Path, findings: list[Finding]) -> None:
                 )
 
 
+def check_markdown_commands(root: Path, findings: list[Finding]) -> None:
+    """验证代码块中的技能脚本路径，避免复制已失效的维护命令。"""
+    markdown_files = [root / "SKILL.md", *sorted((root / "references").rglob("*.md"))]
+    for path in markdown_files:
+        if not path.is_file():
+            continue
+        text = read_utf8(path, findings, root)
+        if text is None:
+            continue
+        for block in FENCED_CODE_RE.findall(text):
+            lowered = block.casefold()
+            if "mspm0-ccs" in lowered:
+                findings.append(
+                    Finding(
+                        "error",
+                        relative(path, root),
+                        "代码块仍引用旧 mspm0-ccs 路径",
+                    )
+                )
+            if re.search(r"(?<![_A-Za-z0-9])scaffold\.py\b", block, flags=re.IGNORECASE):
+                findings.append(
+                    Finding(
+                        "error",
+                        relative(path, root),
+                        "代码块仍引用不存在的 scaffold.py；应使用 scaffold_project.py",
+                    )
+                )
+            for match in PYTHON_COMMAND_RE.finditer(block):
+                token = next(value for value in match.groups() if value is not None)
+                normalized = token.replace("\\", "/")
+                if normalized.startswith("<"):
+                    continue
+                if normalized.casefold().startswith("scripts/"):
+                    candidate = root / Path(normalized)
+                    if not candidate.is_file():
+                        findings.append(
+                            Finding(
+                                "error",
+                                relative(path, root),
+                                f"代码块引用不存在的技能脚本：{token}",
+                            )
+                        )
+
+
 def check_absolute_paths(root: Path, findings: list[Finding]) -> None:
     text_suffixes = {".md", ".py", ".yaml", ".yml", ".json", ".syscfg", ".c", ".h"}
     for path in root.rglob("*"):
@@ -205,6 +272,26 @@ def check_openai_yaml(root: Path, skill_name: str, findings: list[Finding]) -> N
     short = re.search(r'short_description:\s*"([^"]+)"', text)
     if not short or not 25 <= len(short.group(1)) <= 64:
         findings.append(Finding("error", relative(path, root), "short_description 长度不在 25–64"))
+    prompt = re.search(r'default_prompt:\s*"([^"]+)"', text)
+    if not prompt:
+        findings.append(Finding("error", relative(path, root), "无法读取 default_prompt"))
+        return
+    prompt_text = prompt.group(1)
+    identify_index = prompt_text.find("识别")
+    primary_index = prompt_text.find("天猛星")
+    if (
+        identify_index < 0
+        or "板卡" not in prompt_text
+        or not any(value in prompt_text for value in ("不明确", "无法识别", "不得假定"))
+        or (primary_index >= 0 and identify_index > primary_index)
+    ):
+        findings.append(
+            Finding(
+                "error",
+                relative(path, root),
+                "default_prompt 必须先识别板卡，并明确板卡不明时不得套用天猛星板级默认",
+            )
+        )
 
 
 def check_tianqiaoxing_scope(root: Path, findings: list[Finding]) -> None:
@@ -842,6 +929,140 @@ def manifest_files(manifest: dict[str, object]) -> list[str]:
     return []
 
 
+def calculate_template_content_sha256(template: Path, manifest: dict[str, object]) -> str:
+    """按规范相对路径与 LF 规范化 UTF-8 文本计算摘要。"""
+    syscfg = manifest.get("syscfg")
+    values = ([str(syscfg)] if isinstance(syscfg, str) and syscfg else []) + manifest_files(manifest)
+    digest = hashlib.sha256()
+    for value in sorted({Path(item).as_posix() for item in values}):
+        candidate = (template / value).resolve()
+        try:
+            candidate.relative_to(template.resolve())
+        except ValueError as exc:
+            raise ValueError(f"摘要文件越出模板目录：{value}") from exc
+        if not candidate.is_file():
+            raise ValueError(f"摘要文件不存在：{value}")
+        try:
+            content = candidate.read_text(encoding="utf-8", errors="strict")
+        except UnicodeError as exc:
+            raise ValueError(f"摘要文件不是有效 UTF-8：{value}") from exc
+        canonical_bytes = content.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+        digest.update(value.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(canonical_bytes)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def check_validation_contract(
+    manifest: dict[str, object],
+    manifest_path: Path,
+    root: Path,
+    findings: list[Finding],
+) -> None:
+    rel = relative(manifest_path, root)
+    legacy = sorted(LEGACY_VALIDATION_KEYS & manifest.keys())
+    if legacy:
+        findings.append(Finding("error", rel, "schema 2 禁止旧验证字段：" + ", ".join(legacy)))
+
+    validation = manifest.get("validation")
+    if not isinstance(validation, dict):
+        findings.append(Finding("error", rel, "字段 validation 必须是对象"))
+        return
+    if set(validation) != {"highest_level", "levels", "records"}:
+        findings.append(
+            Finding(
+                "error",
+                rel,
+                "validation 必须且只能包含 highest_level、levels、records",
+            )
+        )
+
+    highest = validation.get("highest_level")
+    if highest not in VALIDATION_HIGHEST_LEVELS:
+        findings.append(Finding("error", rel, f"无效 highest_level：{highest}"))
+
+    levels = validation.get("levels")
+    if not isinstance(levels, dict):
+        findings.append(Finding("error", rel, "validation.levels 必须是对象"))
+        levels = {}
+    else:
+        if set(levels) != set(VALIDATION_LEVELS):
+            findings.append(
+                Finding(
+                    "error",
+                    rel,
+                    "validation.levels 必须精确包含六个验证级别",
+                )
+            )
+        for level in VALIDATION_LEVELS:
+            status = levels.get(level)
+            if status not in VALIDATION_STATUSES:
+                findings.append(Finding("error", rel, f"{level} 状态无效：{status}"))
+
+    passed_levels = [level for level in VALIDATION_LEVELS if levels.get(level) == "passed"]
+    expected_highest = passed_levels[-1] if passed_levels else "unverified"
+    if highest != expected_highest:
+        findings.append(
+            Finding(
+                "error",
+                rel,
+                f"highest_level 与 passed 级别不一致：期望 {expected_highest}，实际 {highest}",
+            )
+        )
+
+    records = validation.get("records")
+    if not isinstance(records, list):
+        findings.append(Finding("error", rel, "validation.records 必须是列表"))
+        return
+    recorded_pairs: set[tuple[str, str]] = set()
+    content_sha256 = manifest.get("content_sha256")
+    for index, record in enumerate(records):
+        label = f"validation.records[{index}]"
+        if not isinstance(record, dict):
+            findings.append(Finding("error", rel, f"{label} 必须是对象"))
+            continue
+        missing = [
+            key for key in ("level", "status", "checked_at", "result")
+            if not isinstance(record.get(key), str) or not str(record.get(key)).strip()
+        ]
+        if missing:
+            findings.append(Finding("error", rel, f"{label} 缺少非空字段：" + ", ".join(missing)))
+            continue
+        level = str(record["level"])
+        status = str(record["status"])
+        if level not in VALIDATION_LEVELS:
+            findings.append(Finding("error", rel, f"{label}.level 无效：{level}"))
+        if status not in {"passed", "failed"}:
+            findings.append(Finding("error", rel, f"{label}.status 只能是 passed 或 failed"))
+        if levels.get(level) != status:
+            findings.append(Finding("error", rel, f"{label} 与 validation.levels 状态不一致"))
+        recorded_pairs.add((level, status))
+        artifact_sha256 = record.get("artifact_sha256")
+        if artifact_sha256 is not None and (
+            not isinstance(artifact_sha256, str)
+            or CONTENT_SHA256_RE.fullmatch(artifact_sha256) is None
+        ):
+            findings.append(Finding("error", rel, f"{label}.artifact_sha256 不是有效 SHA-256"))
+        if (
+            level == "static"
+            and status == "passed"
+            and artifact_sha256 != content_sha256
+        ):
+            findings.append(
+                Finding(
+                    "error",
+                    rel,
+                    f"{label} 的静态记录摘要必须与顶层 content_sha256 一致",
+                )
+            )
+
+    for level in VALIDATION_LEVELS:
+        status = levels.get(level)
+        if status in {"passed", "failed"} and (level, str(status)) not in recorded_pairs:
+            findings.append(Finding("error", rel, f"{level}={status} 缺少对应验证记录"))
+
+
 def check_template_includes(template: Path, root: Path, findings: list[Finding]) -> None:
     source_files = [
         path
@@ -901,28 +1122,72 @@ def check_templates(root: Path, findings: list[Finding]) -> None:
                 "board",
                 "device",
                 "package",
-                "validated",
-                "validation_level",
-                "physical_behavior_revalidated",
+                "product",
+                "sdk",
+                "sysconfig",
+                "lifecycle",
+                "validation",
                 "source_files",
                 "syscfg",
+                "content_sha256",
             )
             for key in required_keys:
                 if key not in manifest:
                     findings.append(Finding("error", relative(manifest_path, root), f"缺少字段 {key}"))
-            if manifest.get("schema") != 1:
+            if manifest.get("schema") != 2:
                 findings.append(
-                    Finding("error", relative(manifest_path, root), "manifest schema 必须为 1")
+                    Finding("error", relative(manifest_path, root), "manifest schema 必须为 2")
                 )
-            for key in ("name", "title", "description", "board", "device", "package", "validation_level", "syscfg"):
+            for key in (
+                "name",
+                "title",
+                "description",
+                "board",
+                "device",
+                "package",
+                "product",
+                "sdk",
+                "sysconfig",
+                "lifecycle",
+                "syscfg",
+                "content_sha256",
+            ):
                 if not isinstance(manifest.get(key), str) or not str(manifest.get(key)).strip():
                     findings.append(
                         Finding("error", relative(manifest_path, root), f"字段 {key} 必须是非空字符串")
                     )
-            if not isinstance(manifest.get("validated"), bool):
+            if manifest.get("lifecycle") not in {
+                "candidate",
+                "reference",
+                "active",
+                "quarantined",
+                "deprecated",
+            }:
                 findings.append(
-                    Finding("error", relative(manifest_path, root), "字段 validated 必须是布尔值")
+                    Finding("error", relative(manifest_path, root), "字段 lifecycle 状态无效")
                 )
+            product = str(manifest.get("product", ""))
+            expected_sdk = (
+                "MSPM0 SDK " + product.split("@", 1)[1]
+                if product.startswith("mspm0_sdk@") and "@" in product
+                else ""
+            )
+            if not expected_sdk or manifest.get("sdk") != expected_sdk:
+                findings.append(
+                    Finding(
+                        "error",
+                        relative(manifest_path, root),
+                        f"sdk 与 product 不一致：期望 {expected_sdk or '精确 mspm0_sdk@版本'}",
+                    )
+                )
+            if (
+                not isinstance(manifest.get("content_sha256"), str)
+                or CONTENT_SHA256_RE.fullmatch(str(manifest.get("content_sha256"))) is None
+            ):
+                findings.append(
+                    Finding("error", relative(manifest_path, root), "字段 content_sha256 必须是小写 SHA-256")
+                )
+            check_validation_contract(manifest, manifest_path, root, findings)
             source_files = manifest.get("source_files")
             if (
                 not isinstance(source_files, list)
@@ -940,26 +1205,6 @@ def check_templates(root: Path, findings: list[Finding]) -> None:
                         "manifest name 必须与模板目录名一致",
                     )
                 )
-            physical_revalidated = manifest.get("physical_behavior_revalidated")
-            if not isinstance(physical_revalidated, bool):
-                findings.append(
-                    Finding(
-                        "error",
-                        relative(manifest_path, root),
-                        "缺少布尔字段 physical_behavior_revalidated",
-                    )
-                )
-            if (
-                str(manifest.get("validation_level", "")).lower().startswith("hardware")
-                and physical_revalidated is not True
-            ):
-                findings.append(
-                    Finding(
-                        "error",
-                        relative(manifest_path, root),
-                        "当前 validation_level 声称 hardware 时必须明确完成物理复验",
-                    )
-                )
             syscfgs = list(template.glob("*.syscfg"))
             if len(syscfgs) != 1:
                 findings.append(Finding("error", rel, f"模板应有一个根级 .syscfg，实际 {len(syscfgs)} 个"))
@@ -975,7 +1220,12 @@ def check_templates(root: Path, findings: list[Finding]) -> None:
                 syscfg_text = read_utf8(syscfg, findings, root)
                 if syscfg_text is None:
                     continue
-                metadata_packages = set(re.findall(r'--package\s+"([^"]+)"', syscfg_text))
+                metadata_packages = set(
+                    re.findall(
+                        r'(?m)@v2CliArgs[^\r\n]*--package\s+"([^"]+)"',
+                        syscfg_text,
+                    )
+                )
                 expected_package = {str(manifest.get("package"))}
                 if metadata_packages != expected_package:
                     findings.append(
@@ -985,6 +1235,43 @@ def check_templates(root: Path, findings: list[Finding]) -> None:
                             "manifest package 与 .syscfg metadata 不一致："
                             f"manifest={manifest.get('package')}，"
                             f"metadata={sorted(metadata_packages)}",
+                        )
+                    )
+                metadata_products = set(
+                    re.findall(
+                        r'(?m)@v2CliArgs[^\r\n]*--product\s+"([^"]+)"',
+                        syscfg_text,
+                    )
+                )
+                expected_product = {str(manifest.get("product"))}
+                if metadata_products != expected_product:
+                    findings.append(
+                        Finding(
+                            "error",
+                            relative(manifest_path, root),
+                            "manifest product 与 .syscfg v2 metadata 不一致："
+                            f"manifest={manifest.get('product')}，"
+                            f"metadata={sorted(metadata_products)}",
+                        )
+                    )
+                versions_match = re.search(r"@versions\s+(\{[^\r\n]+\})", syscfg_text)
+                tool_version = ""
+                if versions_match:
+                    try:
+                        versions_payload = json.loads(versions_match.group(1))
+                    except json.JSONDecodeError:
+                        versions_payload = None
+                    if isinstance(versions_payload, dict):
+                        raw_tool = versions_payload.get("tool")
+                        if isinstance(raw_tool, str):
+                            tool_version = raw_tool.split("+", 1)[0].strip()
+                if not tool_version or manifest.get("sysconfig") != tool_version:
+                    findings.append(
+                        Finding(
+                            "error",
+                            relative(manifest_path, root),
+                            "manifest sysconfig 与 .syscfg @versions.tool 不一致："
+                            f"manifest={manifest.get('sysconfig')}，metadata={tool_version or 'missing'}",
                         )
                     )
                 metadata_devices = set(
@@ -1002,6 +1289,14 @@ def check_templates(root: Path, findings: list[Finding]) -> None:
                             "manifest device 与 .syscfg v2 metadata 不一致："
                             f"manifest={manifest.get('device')}，"
                             f"metadata={sorted(metadata_devices)}",
+                        )
+                    )
+                if "X" in str(manifest.get("device", "")).upper():
+                    findings.append(
+                        Finding(
+                            "error",
+                            relative(manifest_path, root),
+                            "manifest device 必须是精确器件，不能使用 X 族通配值",
                         )
                     )
                 if re.search(r"(?m)^\s*GPIO\d+\.port\s*=", syscfg_text):
@@ -1039,6 +1334,19 @@ def check_templates(root: Path, findings: list[Finding]) -> None:
                 if not candidate.exists():
                     findings.append(
                         Finding("error", relative(manifest_path, root), f"source_files 路径不存在：{item}")
+                    )
+            try:
+                actual_sha256 = calculate_template_content_sha256(template, manifest)
+            except ValueError as exc:
+                findings.append(Finding("error", relative(manifest_path, root), str(exc)))
+            else:
+                if manifest.get("content_sha256") != actual_sha256:
+                    findings.append(
+                        Finding(
+                            "error",
+                            relative(manifest_path, root),
+                            "content_sha256 与 syscfg/source_files 内容不一致",
+                        )
                     )
             declared_sources = {
                 Path(item).as_posix()
@@ -1084,6 +1392,153 @@ def check_templates(root: Path, findings: list[Finding]) -> None:
             check_template_includes(template, root, findings)
 
 
+def extract_c_functions(text: str) -> dict[str, str]:
+    """提取简单 C 函数体，供 ISR 禁用调用的保守静态检查使用。"""
+    functions: dict[str, str] = {}
+    pattern = re.compile(
+        r"(?m)^[ \t]*(?:static[ \t]+)?[A-Za-z_][A-Za-z0-9_ \t\*]*?[ \t]+"
+        r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*\([^;{}]*\)[ \t\r\n]*\{"
+    )
+    for match in pattern.finditer(text):
+        depth = 1
+        index = match.end()
+        while index < len(text) and depth:
+            if text[index] == "{":
+                depth += 1
+            elif text[index] == "}":
+                depth -= 1
+            index += 1
+        if depth == 0:
+            functions[match.group("name")] = text[match.end() : index - 1]
+    return functions
+
+
+def check_uart_template_safety(root: Path, findings: list[Finding]) -> None:
+    template = root / "assets" / "templates" / "tianmengxing" / "uart_dma_tx_irq_rx"
+    if not template.is_dir():
+        return
+    syscfgs = sorted(template.glob("*.syscfg"))
+    for syscfg in syscfgs:
+        text = read_utf8(syscfg, findings, root)
+        if text is None:
+            continue
+        unsafe_pins = sorted(
+            set(
+                re.findall(
+                    r'UART[A-Za-z0-9_]*\.peripheral\.(?:txPin|rxPin)\.\$assign\s*=\s*"(PB[6-9])"',
+                    text,
+                )
+            )
+        )
+        if unsafe_pins:
+            findings.append(
+                Finding(
+                    "error",
+                    relative(syscfg, root),
+                    "天猛星 UART 禁止占用板载 SPI Flash 的 PB6–PB9：" + ", ".join(unsafe_pins),
+                )
+            )
+
+    combined_functions: dict[str, tuple[Path, str]] = {}
+    combined_text = ""
+    for source in sorted(template.rglob("*.c")):
+        text = read_utf8(source, findings, root)
+        if text is None:
+            continue
+        combined_text += "\n" + text
+        for name, body in extract_c_functions(text).items():
+            combined_functions[name] = (source, body)
+    if "UART_RX_MODE_ISR_CALLBACK" in combined_text:
+        findings.append(
+            Finding(
+                "error",
+                relative(template, root),
+                "UART 模板禁止在 RX ISR 中直接执行帧回调；应使用 IRQ deferred/frameReady 模式",
+            )
+        )
+
+    forbidden = re.compile(
+        r"\b(?:v?snprintf|printf|sscanf|strtof|strtod|atof|"
+        r"UART_parseRxFloats|UART_(?:try)?(?:printfDMA|sendStrDMA)|"
+        r"DL_DMA_[A-Za-z0-9_]+)\s*\("
+    )
+    for name, (source, body) in combined_functions.items():
+        if not (
+            name.endswith("IRQHandler")
+            or name in {"UART_RxCallback", "UART_DMADoneTxCallback"}
+        ):
+            continue
+        match = forbidden.search(body)
+        if match or re.search(r"(?:->|\.)onFrame\s*\(", body):
+            token = match.group(0).rstrip("(").strip() if match else "onFrame"
+            findings.append(
+                Finding(
+                    "error",
+                    relative(source, root),
+                    f"{name} 在中断路径执行复杂解析、格式化或发送：{token}",
+                )
+            )
+
+
+def check_tianmengxing_device_instances(root: Path, findings: list[Finding]) -> None:
+    reference_dir = root / "references" / "hardware" / "tianmengxing-peripherals"
+    if not reference_dir.is_dir():
+        return
+    for path in sorted(reference_dir.glob("*.md")):
+        text = read_utf8(path, findings, root)
+        if text is None:
+            continue
+        invalid_uarts: set[str] = set()
+        invalid_timers: set[str] = set()
+        invalid_ranges: list[str] = []
+        for line in text.splitlines():
+            # 允许文档明确列出旧错误作为反例，但禁止把它写成推荐、表格配置或代码。
+            negative_context = any(
+                marker in line
+                for marker in ("不存在", "禁止", "错误", "旧", "不要", "不得", "不能使用")
+            )
+            if negative_context:
+                continue
+            invalid_uarts.update(
+                value
+                for value in re.findall(r"\bUART_?(\d+)\b", line)
+                if int(value) not in {0, 1, 2, 3}
+            )
+            invalid_timers.update(
+                value
+                for value in re.findall(r"\bTIMG(\d+)\b", line)
+                if int(value) not in {0, 6, 7, 8, 12}
+            )
+            if re.search(r"TIMG0\s*[-–—~～]\s*TIMG7", line):
+                invalid_ranges.append(line)
+        sorted_uarts = sorted(invalid_uarts, key=int)
+        sorted_timers = sorted(invalid_timers, key=int)
+        if sorted_uarts:
+            findings.append(
+                Finding(
+                    "error",
+                    relative(path, root),
+                    "MSPM0G3507 不存在这些 UART 实例：" + ", ".join(f"UART{x}" for x in sorted_uarts),
+                )
+            )
+        if sorted_timers:
+            findings.append(
+                Finding(
+                    "error",
+                    relative(path, root),
+                    "MSPM0G3507 不存在这些 TIMG 实例：" + ", ".join(f"TIMG{x}" for x in sorted_timers),
+                )
+            )
+        if invalid_ranges:
+            findings.append(
+                Finding(
+                    "error",
+                    relative(path, root),
+                    "不得用 TIMG0–TIMG7 连续范围描述 MSPM0G3507；应枚举实际实例",
+                )
+            )
+
+
 def check_script_help(root: Path, findings: list[Finding]) -> None:
     public_scripts = (
         "capture_example.py",
@@ -1099,8 +1554,34 @@ def check_script_help(root: Path, findings: list[Finding]) -> None:
         "validate_skill.py",
     )
     for name in public_scripts:
-        if not (root / "scripts" / name).is_file():
+        script = root / "scripts" / name
+        if not script.is_file():
             findings.append(Finding("error", f"scripts/{name}", "缺少公共脚本"))
+            continue
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-B", str(script), "--help"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            findings.append(Finding("error", f"scripts/{name}", f"--help 执行失败：{exc}"))
+            continue
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip().splitlines()
+            suffix = f"：{detail[-1]}" if detail else ""
+            findings.append(
+                Finding(
+                    "error",
+                    f"scripts/{name}",
+                    f"--help 返回 {completed.returncode}{suffix}",
+                )
+            )
 
 
 def check_scaffold_adaptation(root: Path, findings: list[Finding]) -> None:
@@ -1278,6 +1759,7 @@ def validate(root: Path) -> list[Finding]:
     skill_name, _description = check_frontmatter(root, findings)
     check_package_files(root, findings)
     check_markdown(root, findings)
+    check_markdown_commands(root, findings)
     check_absolute_paths(root, findings)
     check_openai_yaml(root, skill_name, findings)
     check_tianmengxing_scope(root, findings)
@@ -1286,6 +1768,8 @@ def validate(root: Path) -> list[Finding]:
     check_i2c_reference(root, findings)
     check_sysconfig_patterns(root, findings)
     check_templates(root, findings)
+    check_uart_template_safety(root, findings)
+    check_tianmengxing_device_instances(root, findings)
     check_script_help(root, findings)
     check_scaffold_adaptation(root, findings)
     check_ccs_workspace_classification(root, findings)

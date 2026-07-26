@@ -11,7 +11,7 @@ description: Develop, inspect, modify, validate, scaffold, build, flash, and deb
 - Preserve the user's project structure and treat `.syscfg` as the source of truth for pinmux, clocks, peripherals, interrupts, and DMA.
 - Inspect generated `ti_msp_dl_config.h` before using macro, IRQ, instance, or init-function names.
 - Prefer the user's project and matching local SDK metadata over bundled templates.
-- Report static, SysConfig, build, flash, serial, and physical-board evidence as separate validation levels.
+- Report `static`, `sysconfig_generation`, `compile_link`, `flash`, `serial`, and `physical_behavior` independently. A passed lower level never implies a higher one.
 - Treat Tianmengxing as the primary maintained board. When the board is not explicit, identify it from project or hardware evidence instead of assuming Tianmengxing.
 - For Tianmengxing or Tianqiaoxing, prefer the exact board schematic, current LCKFB material, and matching board guide for board-level facts.
 - Keep Tianqiaoxing support at the common-peripheral layer. For a removed board application, use only the current material supplied for that task and do not reconstruct it from remembered wiring.
@@ -24,7 +24,8 @@ Read only one Tier-1 reference first. Load Tier-2 only when the task needs that 
 | User task | Tier-1 first read | Tier-2 conditional read | Expected result |
 | --- | --- | --- | --- |
 | Inspect or modify an existing CCS, Keil, or CMake project; edit `.syscfg`; build | [project-lifecycle.md](references/workflows/project-lifecycle.md) | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) for runtime code | Minimal source/config change with an evidence-based validation chain |
-| Add GPIO, UART, SPI, ADC, Timer, PWM, DMA, interrupt, clock, or external module | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) | Matching board/peripheral guide; use [sysconfig-patterns.md](references/runtime/sysconfig-patterns.md) only when its Contents lists a matching pattern | SysConfig/DriverLib implementation using local generated names |
+| Add GPIO, UART, SPI, ADC, PWM, DMA, interrupt, clock, or external module | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) | Matching board/peripheral guide; use [sysconfig-patterns.md](references/runtime/sysconfig-patterns.md) only when its Contents lists a matching pattern | SysConfig/DriverLib implementation using local generated names |
+| Select an MSPM0G3507 Timer instance or calculate its period/range | [timer.md](references/hardware/tianmengxing-peripherals/timer.md) | [driverlib-runtime.md](references/runtime/driverlib-runtime.md) for ISR/runtime integration | Exact discrete instances and a divider/prescaler-aware calculation without board-pin assumptions |
 | Add an I2C controller/target or diagnose an I2C bus | [i2c.md](references/peripherals/i2c.md) | Matching board I2C guide, current schematic, and target-device datasheet | Electrically safe transaction flow with bounded waits and observable validation |
 | Add a quadrature encoder or configure TimerG QEI | [qei.md](references/peripherals/qei.md) | Matching board guide, current schematic, and installed SDK `timg_qei_mode` example | Pin-safe QEI design with explicit count scaling and wrap handling |
 | Create a new project or select a reusable start | [scaffolding.md](references/workflows/scaffolding.md) | Matching board guide; then one selected asset | A dry-run-reviewed, non-overwriting project scaffold |
@@ -47,11 +48,13 @@ Use `python -B scripts/list_examples.py` to inspect metadata before opening temp
 
 Treat templates as starting evidence, not universal project layouts. Copy only the needed pattern into an existing project.
 
+Packaged templates currently carry `static` evidence only. Read each schema-2 manifest before reuse; do not promote an old observation or a successful static check into SysConfig, build, flash, serial, or physical-behavior evidence.
+
 ## Safety Boundary
 
 ### Default read-only
 
-- Inspect files, manifests, generated headers, tool versions, PnP/serial devices, and probe listings.
+- Inspect files, manifests, generated headers, tool versions, PnP/serial devices, and OS-level probe listings.
 - Run `check_syscfg.py`, `run_sysconfig.py --dry-run`, `detect_probe.py`, validators, and CLI `--help`.
 
 ### Ordinary reversible changes
@@ -62,7 +65,7 @@ Treat templates as starting evidence, not universal project layouts. Copy only t
 
 ### Require explicit user intent
 
-- Program flash, reset or halt a target, attach a debugger, send serial commands that change device state, or overwrite/remove user files.
+- Program flash, reset or halt a target, run backend `inspect-target`, attach a debugger, send serial commands that change device state, or overwrite/remove user files.
 - Change device, package, SDK, compiler, SysConfig tool version, board, clock source, probe configuration, or electrical pin assignment when project evidence is insufficient.
 
 ### Never assume or automate

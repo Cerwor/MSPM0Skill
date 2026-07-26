@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -38,10 +39,25 @@ DEFAULT_EXCLUDES = [
     "**/device.cmd.genlibs",
 ]
 EXAMPLE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+V2_CLI_ARGS_RE = re.compile(
+    r"(?m)^[ \t]*(?://|/\*+|\*)?[ \t]*@v2CliArgs\b([^\r\n]*)"
+)
+CLI_OPTION_RE = re.compile(r'--([A-Za-z0-9_-]+)\s+"([^"]*)"')
+VALIDATION_LEVELS = (
+    "static",
+    "sysconfig_generation",
+    "compile_link",
+    "flash",
+    "serial",
+    "physical_behavior",
+)
 
 
 def read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")
+    try:
+        return path.read_text(encoding="utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise SystemExit(f"文件不是有效 UTF-8，已停止捕获：{path}: {exc}") from exc
 
 
 def iter_files(root: Path) -> Iterable[Path]:
@@ -109,11 +125,32 @@ def is_auto_source(path: Path, rel: str) -> bool:
 
 
 def parse_metadata(syscfg_text: str) -> dict[str, Any]:
+    """只从精确的 v2 SysConfig 参数读取规范器件元数据。"""
+    v2_lines = V2_CLI_ARGS_RE.findall(syscfg_text)
+    if not v2_lines:
+        raise SystemExit("SysConfig 缺少 @v2CliArgs；无法确定精确 device/package/product。")
+
+    candidates: list[dict[str, str]] = []
+    for line in v2_lines:
+        values = {key: value.strip() for key, value in CLI_OPTION_RE.findall(line)}
+        if values:
+            candidates.append(values)
+    if not candidates:
+        raise SystemExit("@v2CliArgs 不含可解析的 device/package/product。")
+
     metadata: dict[str, Any] = {}
-    for key in ("device", "package", "product", "part"):
-        match = re.search(rf"--{key}\s+\"([^\"]+)\"", syscfg_text)
-        if match:
-            metadata[key] = match.group(1)
+    for key in ("device", "package", "product"):
+        values = {candidate.get(key, "").strip() for candidate in candidates}
+        values.discard("")
+        if len(values) != 1:
+            raise SystemExit(f"@v2CliArgs 必须提供唯一且非空的 --{key}；实际为 {sorted(values)}。")
+        metadata[key] = values.pop()
+
+    if "X" in str(metadata["device"]).upper():
+        raise SystemExit(
+            f"@v2CliArgs device 必须是精确器件，不能使用族通配值：{metadata['device']}"
+        )
+
     versions = re.search(r"@versions\s+(\{[^\n]+\})", syscfg_text)
     if versions:
         metadata["versions"] = versions.group(1).strip()
@@ -164,13 +201,57 @@ def classify_complexity(peripherals: list[str], pins: list[str], sources: list[P
     return "basic"
 
 
-def bool_arg(value: str) -> bool:
-    lowered = value.lower()
-    if lowered in {"1", "true", "yes", "y"}:
-        return True
-    if lowered in {"0", "false", "no", "n"}:
-        return False
-    raise argparse.ArgumentTypeError("expected true or false")
+def validation_candidate() -> dict[str, Any]:
+    """新捕获模板没有验证证据，必须从候选状态开始。"""
+    return {
+        "highest_level": "unverified",
+        "levels": {level: "not_run" for level in VALIDATION_LEVELS},
+        "records": [],
+    }
+
+
+def sdk_display_name(product: str) -> str:
+    prefix = "mspm0_sdk@"
+    if not product.startswith(prefix) or not product[len(prefix) :].strip():
+        raise SystemExit(f"@v2CliArgs product 不是精确 MSPM0 SDK：{product}")
+    return f"MSPM0 SDK {product[len(prefix):].strip()}"
+
+
+def sysconfig_display_version(versions: str) -> str:
+    if not versions:
+        raise SystemExit("SysConfig 缺少 @versions.tool，无法记录 SysConfig 版本。")
+    try:
+        payload = json.loads(versions)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"@versions 不是有效 JSON：{exc}") from exc
+    tool = payload.get("tool") if isinstance(payload, dict) else None
+    if not isinstance(tool, str) or not tool.strip():
+        raise SystemExit("@versions 必须包含非空 tool 版本。")
+    return tool.split("+", 1)[0].strip()
+
+
+def calculate_content_sha256(template_root: Path, relative_files: Iterable[str]) -> str:
+    """按规范相对路径与 UTF-8 文本计算跨平台可复现的模板内容摘要。"""
+    digest = hashlib.sha256()
+    normalized = sorted({Path(value).as_posix() for value in relative_files})
+    for value in normalized:
+        candidate = (template_root / value).resolve()
+        try:
+            candidate.relative_to(template_root.resolve())
+        except ValueError as exc:
+            raise SystemExit(f"摘要文件必须位于模板目录内：{value}") from exc
+        if not candidate.is_file():
+            raise SystemExit(f"摘要文件不存在：{value}")
+        try:
+            content = candidate.read_text(encoding="utf-8", errors="strict")
+        except UnicodeError as exc:
+            raise SystemExit(f"摘要文件不是有效 UTF-8：{value}: {exc}") from exc
+        canonical_bytes = content.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+        digest.update(value.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(canonical_bytes)
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def resolve_template_destination(output_dir: Path, name: str) -> Path:
@@ -205,9 +286,7 @@ def main() -> int:
     parser.add_argument("--include", action="append", default=[], help="Source glob to include, relative to project root. Repeatable.")
     parser.add_argument("--exclude", action="append", default=[], help="Additional glob to exclude. Repeatable.")
     parser.add_argument("--auto", action="store_true", help="Best-effort include of common source directories.")
-    parser.add_argument("--board", default="", help="Board name for manifest.")
-    parser.add_argument("--validated", type=bool_arg, default=False, help="Whether this example has been hardware validated.")
-    parser.add_argument("--validation-level", default="unverified", help="Validation label, e.g. source, build, hardware.")
+    parser.add_argument("--board", required=True, help="Non-empty board name for manifest.")
     parser.add_argument("--force", action="store_true", help="显式覆盖输出目录中的同名模板。")
     parser.add_argument(
         "--output-dir",
@@ -223,6 +302,25 @@ def main() -> int:
     if not project.is_dir():
         raise SystemExit(f"Project directory not found: {project}")
 
+    syscfg = find_syscfg(project, args.syscfg)
+    syscfg_text = read_text(syscfg)
+    sources = select_sources(project, args.include, DEFAULT_EXCLUDES + args.exclude, args.auto)
+    if not sources:
+        raise SystemExit("No source files matched. Refusing to create a manifest with an empty source_files list.")
+    board = args.board.strip()
+    if not board:
+        raise SystemExit("--board must not be empty.")
+
+    metadata = parse_metadata(syscfg_text)
+    sdk = sdk_display_name(metadata["product"])
+    sysconfig = sysconfig_display_version(metadata.get("versions", ""))
+    peripherals = parse_modules(syscfg_text)
+    pins = parse_pins(syscfg_text)
+    freertos = source_mentions_freertos(sources)
+    complexity = classify_complexity(peripherals, pins, sources, freertos)
+    generated_names = detect_generated_names(project)
+
+    # 所有只读预检通过后才创建或覆盖候选目录，避免留下半成品。
     dest = resolve_template_destination(args.output_dir, args.name)
     if dest.exists():
         if not args.force:
@@ -234,10 +332,6 @@ def main() -> int:
     src_dest = dest / "src"
     src_dest.mkdir()
 
-    syscfg = find_syscfg(project, args.syscfg)
-    syscfg_text = read_text(syscfg)
-    sources = select_sources(project, args.include, DEFAULT_EXCLUDES + args.exclude, args.auto)
-
     shutil.copy2(syscfg, dest / "example.syscfg")
     for source in sources:
         rel = source.relative_to(project)
@@ -245,30 +339,32 @@ def main() -> int:
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, out)
 
-    metadata = parse_metadata(syscfg_text)
-    peripherals = parse_modules(syscfg_text)
-    pins = parse_pins(syscfg_text)
-    freertos = source_mentions_freertos(sources)
-    complexity = classify_complexity(peripherals, pins, sources, freertos)
-
+    source_files = [f"src/{rel_posix(path, project)}" for path in sources]
+    content_sha256 = calculate_content_sha256(
+        dest,
+        ["example.syscfg", *source_files],
+    )
     manifest = {
-        "schema": 1,
+        "schema": 2,
         "name": args.name,
         "title": args.title or args.name.replace("_", " ").title(),
         "description": args.description or "Captured MSPM0 CCS example.",
-        "board": args.board,
-        "device": metadata.get("device") or metadata.get("part") or "",
-        "package": metadata.get("package") or "",
-        "product": metadata.get("product") or "",
+        "board": board,
+        "device": metadata["device"],
+        "package": metadata["package"],
+        "product": metadata["product"],
+        "sdk": sdk,
+        "sysconfig": sysconfig,
         "sysconfig_versions": metadata.get("versions") or "",
-        "validated": args.validated,
-        "validation_level": args.validation_level,
+        "lifecycle": "candidate",
+        "validation": validation_candidate(),
         "complexity": complexity,
         "peripherals": peripherals,
         "pins": pins,
-        "source_files": [f"src/{rel_posix(path, project)}" for path in sources],
+        "source_files": source_files,
         "syscfg": "example.syscfg",
-        "generated_names": detect_generated_names(project),
+        "content_sha256": content_sha256,
+        "generated_names": generated_names,
         "tags": sorted(set(peripherals + pins + ([ "freertos" ] if freertos else []))),
     }
 

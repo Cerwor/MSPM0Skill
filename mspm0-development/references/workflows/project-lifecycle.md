@@ -2,13 +2,13 @@
 
 ## Scope
 
-Use this when editing `.syscfg` or `system.syscfg`, validating a CCS, Keil, or CMake/GCC/OpenOCD project, building, or flashing.
+Use this when editing `.syscfg` or `system.syscfg`, validating a CCS, Keil, or CMake/GCC/OpenOCD project, or building.
 
 ## Contents
 
 - SysConfig 编辑、静态检查和生成
 - CCS、Keil、CMake/GCC 项目发现与构建
-- 固件输出选择、模板检索和分级验证
+- 固件输出识别、模板检索和分级验证
 
 ## CCS Theia AI Workspace Metadata
 
@@ -85,8 +85,6 @@ Avoid unnecessary edits to `.project`, `.cproject`, `.ccsproject`, `.settings/`,
 - Treat `cmake-build-*`, `build/`, generated binaries, maps, object files, and generated SysConfig outputs as inspection-only.
 - Detect the active target from the existing CMake project instead of assuming `Debug/<project>.out`.
 - Use the existing OpenOCD config files such as `daplink.cfg`, `stlink.cfg`, or `xds110.cfg` when present.
-- MSPM0 OpenOCD support commonly depends on a TI MSPM0-capable OpenOCD build or TI extension branch. Mainline or unrelated OpenOCD builds may not recognize the target or adapter flow.
-- If OpenOCD fails with `unable to find a matching CMSIS-DAP device`, treat it as no matching probe/adapter found, not as proof that the firmware, SysConfig, or linker setup is wrong.
 - Do not require CCS `targetConfigs/*.ccxml` for an OpenOCD-based project.
 
 ## Framework-Style Project Rules
@@ -103,24 +101,6 @@ Run the static checker first:
 ```powershell
 python scripts\check_syscfg.py <project-dir>
 ```
-
-Before flashing or debugging, add the optional connected-probe check:
-
-```powershell
-python scripts\detect_probe.py
-python scripts\check_syscfg.py <project-dir> --probe
-```
-
-The probe detector is read-only. It should not open the target, erase flash, or reset the MCU. If the physical probe conflicts with CCS `.ccxml` or OpenOCD hints, stop and ask the user to confirm the intended backend before flashing.
-
-An empty detector result means "not identified", not "no probe is connected". Composite DAPLink/CMSIS-DAP and XDS110 devices may be exposed as `USBDevice`, `HIDClass`, or `Ports` children and may also create a virtual COM port. On Windows, inspect both PnP and serial views before asking the user or selecting a backend:
-
-```powershell
-Get-PnpDevice -PresentOnly | Where-Object { ($_.FriendlyName + ' ' + $_.InstanceId) -match '(?i)DAP|CMSIS|XDS|J-Link|ST-Link' }
-python scripts\serial_console.py --list
-```
-
-If OS evidence is still ambiguous, use the intended backend's read-only list/probe command. Do not turn a detector miss into a claim that the user disconnected the hardware.
 
 For SysConfig changes, use this priority:
 
@@ -156,7 +136,7 @@ python scripts\run_sysconfig.py <project-dir> `
   --product C:\ti\mspm0_sdk_2_11_00_07\.metadata\product.json
 ```
 
-An explicit tool or product may differ from the project declaration. The wrapper permits that intentional override but reports the mismatch. Without an explicit override, a project that declares SysConfig 1.26.2 must not silently switch to an installed 1.28.0.
+An explicit tool or product may differ from the project declaration. The wrapper permits that intentional override but reports the mismatch. When an existing generated build rule contains one exact, runnable SysConfig path, that path is authoritative for reproducing the active build and a stale `.cproject` version declaration is reported without blocking normal validation. Without exact build-rule evidence or an explicit override, the wrapper must not silently switch a project that declares SysConfig 1.26.2 to an unrelated installed 1.28.0.
 
 `--keep-output` keeps only the wrapper-created temporary directory for inspection. It still does not write into the project. Regenerate the real project outputs through the active build system after validation.
 
@@ -174,45 +154,15 @@ For CMake/GCC/OpenOCD projects, prefer the existing build directory and target:
 
 ```powershell
 cmake --build <project-dir>\cmake-build-debug --target <target>
-cmake --build <project-dir>\cmake-build-debug --target <flash-target>
 ```
 
 If no configured build directory exists, configure one using the project's documented preset/toolchain. Do not invent compiler paths when the project README or toolchain file already declares them.
 
-## DSLite / J-Link Flash
+## Device-action handoff
 
-For a vague request such as "flash this project", detect the connected probe before choosing DSLite, J-Link tools, or OpenOCD. Do not assume the user's previous probe is still connected.
+This document stops at project discovery, SysConfig generation, build, and output identification. For USB/PnP probe detection, backend selection, flash, target connection, register inspection, reset, halt, breakpoints, and recovery, use [backends.md](../debugging/backends.md) as the single owner.
 
-The verified flash path is DSLite / UniFlash with J-Link:
-
-```powershell
-dslite -c <project-dir>\targetConfigs\MSPM0G3507.ccxml -N
-dslite -c <project-dir>\targetConfigs\MSPM0G3507.ccxml -e -r 2 -u <project-dir>\Debug\<project>.out
-```
-
-The `.ccxml` must match the physical probe. A project configured for XDS110 can build successfully and still fail to flash through J-Link.
-
-Use `-r 2 -u` for automated flashing after clock-tree changes. This performs a System Reset after programming. If manual flashing appears to start with the wrong clock speed, press the board reset button before judging the firmware.
-
-If `dslite -N` hangs or cannot list the core, stop stale CCS/DSLite/J-Link sessions, reconnect if needed, and retry detection before erase/program operations.
-
-## CCS-DSS Debug
-
-For interactive debug actions on CCS / CCS Theia projects, use the CCS debug MCP or CCS-DSS section in [backends.md](../debugging/backends.md), according to which backend is actually exposed and selected. Both paths can halt or reset the target and require explicit user intent. A DSS path uses `targetConfigs/*.ccxml`, so the file must match the connected probe such as J-Link or XDS110.
-
-## OpenOCD Flash
-
-Use the project-provided OpenOCD target when available. Otherwise the explicit shape is:
-
-```powershell
-openocd -f <probe-or-board.cfg> -c "program <firmware.elf|firmware.hex|firmware.bin> verify reset exit"
-```
-
-Keep the flash backend explicit, for example `--backend dslite` or `--backend openocd`, when writing wrappers or documentation.
-
-## OpenOCD / GDB Debug
-
-For an MSPM0-capable OpenOCD installation, use the OpenOCD/GDB section in [backends.md](../debugging/backends.md). Keep one operation active per probe and do not automatically mass erase, factory reset, or unlock a target.
+Do not infer permission for a device action from a successful build or from the presence of `.ccxml`/OpenOCD configuration. Confirm the physical probe and selected firmware output before following that reference.
 
 ## Hardware Claims
 

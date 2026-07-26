@@ -538,7 +538,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--retry-delay", type=float, default=1, help="Seconds to wait between retries. Default: 1")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
-    probe = subparsers.add_parser("probe", help="Connect, halt, report target state, then resume")
+    subparsers.add_parser(
+        "inspect-target",
+        help="Connect, halt, report target state, then resume",
+    )
+    subparsers.add_parser(
+        "probe",
+        help="Deprecated alias for inspect-target; this connects to and halts the CPU",
+    )
 
     flash = subparsers.add_parser("flash", help="Flash an ELF/OUT/AXF/HEX/BIN program and optionally verify")
     flash.add_argument("--program", help="Program output path; auto-detected from the project by default")
@@ -563,6 +570,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "probe":
+        print(
+            "warning: 'probe' 已弃用；该操作会连接并暂停 CPU，请改用 'inspect-target'。",
+            file=sys.stderr,
+        )
     args.project_dir = Path(args.project_dir).resolve()
     if not args.project_dir.exists():
         parser.error(f"project directory does not exist: {args.project_dir}")
@@ -583,8 +595,8 @@ def main(argv: list[str] | None = None) -> int:
         automatic_unlock=False,
     )
 
-    if args.command == "probe":
-        return run_with_retries(args, "probe", lambda _speed: "init; halt; targets; resume; shutdown")
+    if args.command in {"inspect-target", "probe"}:
+        return run_with_retries(args, "inspect-target", lambda _speed: "init; halt; targets; resume; shutdown")
     if args.command == "flash":
         program = find_program(args.project_dir, args.program)
         emit("program", path=str(program), suffix=program.suffix.lower())

@@ -1,58 +1,43 @@
 # UART on Tianmengxing G3507
 
-## Available UART Instances
+## Scope
 
-| Instance | Status | Notes |
-|----------|--------|-------|
-| UART0 | Occupied (sharable) | PA10(TX)/PA11(RX) → CH340 USB-C; header pins can share |
-| UART1 | Free | Any free pins |
-| UART2 | Free | Any free pins |
-| UART3 | Free | Any free pins |
-| UART7 | Free | Any free pins |
+本参考只负责天猛星 MSPM0G3507 的 UART 实例、板载连接和引脚冲突。UART 运行时必须使用当前工程生成的实例、IRQ 和 DMA 名称。
 
-## SDK Examples
+## Device instances
 
-| Example | What It Does |
-|---------|-------------|
-| `uart_rw_multibyte_fifo_poll` | TX/RX 4 bytes via FIFO polling, loopback test, LED toggle |
-| `uart_tx_console_multibyte_repeated_fifo_dma` | Console TX via DMA, 115200 baud |
-| `uart_echo_interrupts_standby` | Echo with RX interrupt + standby |
-| `uart_external_loopback_interrupt` | TX/RX with external loopback test |
+MSPM0G3507 只有 `UART0`、`UART1`、`UART2`、`UART3`。不存在 `UART7`。
 
-## Pin Mapping (LP → Tianmengxing)
+| Instance | 板级状态 | 选择规则 |
+| --- | --- | --- |
+| UART0 | PA10/PA11 接板载 CH340，可与排针共用 | 默认调试串口；避免 CH340 与外部发送端同时驱动 RX 网络 |
+| UART1 | 无固定板级默认 | 从精确 LQFP-64 pinmux、原理图和工程占用求解 |
+| UART2 | 无固定板级默认 | 从精确 LQFP-64 pinmux、原理图和工程占用求解 |
+| UART3 | 无固定板级默认 | 从精确 LQFP-64 pinmux、原理图和工程占用求解 |
 
-SDK default: PA10(TX)/PA11(RX) → Keep same (CH340 on board, can share)
+## Board conflicts
 
-## Recommended Pattern (Debug Console)
+- PB6、PB7、PB8、PB9 已连接板载 SPI Flash，不能作为通用 UART 默认引脚。
+- 旧模板曾把 UART1 TX/RX 配到 PB6/PB7。这会让 UART TX 干扰 Flash CS，并可能在 PB7 上形成输出争用；该路由已经移除。
+- UART1 的 PA8/PA9、PB4/PB5 只是器件复用候选。恢复第二路 UART 前，必须确认板卡版本原理图、SysConfig 求解结果，并完成 UART 与 Flash 共存实测。
+- PA18 是 BSL 相关引脚；即使器件 pinmux 允许，也不应作为模板默认 UART 引脚。
 
-1. Inspect `assets/templates/tianmengxing/uart_blocking_tx/`, or use `scripts/scaffold_project.py` with a matching local SDK example.
-2. Edit `.syscfg`: baud = 115200 (change from default 9600) and select MFCLK/BUSCLK.
-3. Generate SysConfig output and build.
-4. After explicit flash intent and successful programming, monitor with `python -B scripts/serial_console.py -p <COM_PORT> -b 115200`.
+## Packaged templates
 
-## Generated Macros (after SysConfig)
+- `uart_blocking_tx`：UART0、PA10/PA11、115200 8N1 阻塞发送起点。
+- `uart_dma_tx_irq_rx`：仅包含 UART0、PA10/PA11、DMA TX 和 IRQ RX。RX ISR 只收字节并置帧标志；浮点解析、`vsnprintf` 和 DMA 启动均在主循环。
 
-```
-UART_0_INST         → UART0
-UART_0_BAUD_RATE    → 115200
-GPIO_UART_0_TX_PIN  → DL_GPIO_PIN_10
-GPIO_UART_0_RX_PIN  → DL_GPIO_PIN_11
-```
+模板只提供当前包记录的静态证据。使用前重新运行匹配版本 SysConfig、编译，并按 manifest 的六级证据分别记录结果。
 
-## Baud Rate & Clock Source Constraint
+## Runtime rules
 
-| Clock Source | Max Baud Rate | Notes |
-|-------------|---------------|-------|
-| LFCLK (32768 Hz) | ~10900 | **无法支持 115200**。需 115200+ 时必须切换时钟源 |
-| MFCLK (4 MHz) | ~1.3M | 推荐用于 115200 |
-| BUSCLK (40 MHz) | ~13M | 高速通信 |
+- 115200 波特率不能直接套用只适合低速的 LFCLK 配置；从当前生成配置确认 UART 功能时钟。
+- ISR 不做字符串格式化、浮点解析、阻塞发送或业务回调。
+- DMA 发送缓冲区在完成中断前不得改写。
+- 未知 UART 实例必须使初始化失败，不能回落到 IRQ 0 或 DMA 通道 0。
 
-> SDK 示例 `uart_rw_multibyte_fifo_poll` 默认使用 LFCLK。如果用户需要 115200，必须先在 `.syscfg` 中将 UART 时钟源从 LFCLK 切换为 MFCLK 或 BUSCLK。
+## Primary sources
 
-## Key APIs
-
-```c
-DL_UART_Main_fillTXFIFO(UART_0_INST, data, len);
-DL_UART_receiveDataBlocking(UART_0_INST);
-while (DL_UART_Main_isBusy(UART_0_INST));
-```
+- [TI MSPM0G3507 datasheet](https://www.ti.com/lit/ds/symlink/mspm0g3507.pdf)：UART0～UART3、LQFP-64 pinmux。
+- [LCKFB Tianmengxing UART tutorial](https://wiki.lckfb.com/zh-hans/tmx-mspm0g3507/ccs-beginner/uart.html)：板载 CH340 与 PA10/PA11。
+- [LCKFB Tianmengxing SPI tutorial](https://wiki.lckfb.com/zh-hans/tmx-mspm0g3507/ccs-beginner/spi.html)：板载 Flash 使用 PB6～PB9。

@@ -1,6 +1,7 @@
 /**
  * 嘉立创天猛星 MSPM0G3507 UART0 阻塞发送冒烟测试示例。
- * 源码模式保留既有硬件串口验证；当前 SysConfig 已用 1.27.0 重新生成，更新后尚未复测物理行为。
+ * 元数据基线为 MSPM0 SDK 2.10.00.04 和 SysConfig 1.27.0；
+ * 当前发布证据以同目录 manifest.json 为准。
  *
  * @cliArgs --device "MSPM0G350X" --part "Default" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
  * @v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"

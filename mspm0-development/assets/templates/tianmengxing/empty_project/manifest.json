@@ -1,6 +1,7 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "empty_project",
+  "lifecycle": "reference",
   "title": "Empty CCS Project Baseline",
   "description": "TI SDK/LaunchPad-derived MSPM0G3507 CCS seed before generated build output exists; board adaptation is required.",
   "board": "Generic MSPM0G3507 CCS seed",
@@ -11,9 +12,29 @@
   "sysconfig": "1.27.0",
   "source_sysconfig": "1.26.2+4477",
   "compiler": "TI Arm Clang 4.0.4.LTS",
-  "validated": true,
-  "validation_level": "sysconfig_syntax",
-  "physical_behavior_revalidated": false,
+  "content_sha256": "07ee331d8ce76e9792401b6aa4cebf4750c70757b4102cd7f067914fb3b1faa7",
+  "validation": {
+    "highest_level": "static",
+    "levels": {
+      "static": "passed",
+      "sysconfig_generation": "not_run",
+      "compile_link": "not_run",
+      "flash": "not_run",
+      "serial": "not_run",
+      "physical_behavior": "not_run"
+    },
+    "records": [
+      {
+        "level": "static",
+        "status": "passed",
+        "checked_at": "2026-07-26",
+        "board_revision": "not-observed",
+        "command": "python -B scripts/validate_skill.py .",
+        "artifact_sha256": "07ee331d8ce76e9792401b6aa4cebf4750c70757b4102cd7f067914fb3b1faa7",
+        "result": "仅静态包检查；未做 SysConfig 生成、编译/链接、烧录、串口测试或实物行为验证。"
+      }
+    ]
+  },
   "origin": "TI LP_MSPM0G3507 SDK seed",
   "adaptation_required": true,
   "complexity": "basic",

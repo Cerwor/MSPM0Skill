@@ -310,7 +310,7 @@ def print_text(probes: list[Probe]) -> None:
     if not probes:
         print("No supported debug probe was identified by the primary scan.")
         print("This result is inconclusive and is not proof that no probe is connected.")
-        print("Inspect OS USB/PnP devices and serial ports, then try the selected backend's own probe command.")
+        print("Inspect OS USB/PnP devices and serial ports before selecting a backend.")
         return
     if len(probes) > 1:
         print(f"Detected {len(probes)} supported debug probes. Ask the user which probe to use.")
@@ -356,7 +356,7 @@ def main() -> int:
         if not probes:
             payload["message"] = (
                 "No supported probe was identified. This is not proof that no probe is connected; "
-                "inspect OS USB/PnP and serial devices and try the backend's own probe command."
+                "inspect OS USB/PnP and serial devices before selecting a backend."
             )
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:

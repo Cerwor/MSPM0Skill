@@ -13,7 +13,7 @@ Use this reference only when creating a new MSPM0 project from a packaged templa
    python -B scripts/list_examples.py --board Tianmengxing --peripheral UART
    ```
 
-   Read `validation_level` and `physical_behavior_revalidated` independently; `validated=true` does not by itself claim current physical-board behavior.
+   Read `validation.highest_level`, every entry under `validation.levels`, and the matching evidence records. Schema 2 manifests no longer use validation booleans.
 
 2. Inspect the scaffold command and run a dry run:
 
@@ -24,9 +24,24 @@ Use this reference only when creating a new MSPM0 project from a packaged templa
 3. Confirm board, device, package, probe, template source, and a destination that does not exist.
 4. Run the same command without `--dry-run`.
 5. Open the generated `.projectspec`, regenerate SysConfig output, and verify generated names before editing runtime code.
-6. Validate in order: source inspection, SysConfig generation, build, probe detection, flash, serial/physical behavior.
+6. Validate in order: static inspection, SysConfig generation, compilation/link, flash, serial behavior, and physical-board behavior. Probe detection is useful operational evidence but is not one of the six template maturity levels.
 
 The scaffolder refuses an existing destination and has no force mode. It copies source, headers, `.syscfg`, and linker command files only; it does not copy generated build output or program a device.
+
+## Template evidence model
+
+Every packaged template uses a schema 2 `manifest.json` with `lifecycle=reference`. The six ordered evidence levels are:
+
+1. `static`
+2. `sysconfig_generation`
+3. `compile_link`
+4. `flash`
+5. `serial`
+6. `physical_behavior`
+
+`validation.highest_level` is the highest level currently supported by its records; it never implies that a later level passed. `validation.levels` reports each level explicitly, and `validation.records` stores `checked_at`, `board_revision`, `command`, `artifact_sha256`, and `result`. A template source change changes `content_sha256` and invalidates higher-level evidence until it is rerun against the new digest.
+
+All bundled templates currently stop at `static`. Their SDK 2.10 metadata identifies the source/configuration baseline but does not prove fresh SysConfig generation or compilation, and MSPM0 SDK 2.11 compatibility has not been validated. Treat every template as a reviewable starting reference, then generate, build, and test it in the target project before relying on it.
 
 ## Packaged template versus SDK example
 
